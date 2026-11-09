@@ -512,6 +512,7 @@ button.rocker:disabled { cursor: not-allowed; opacity: .5; }
 .lib-row b { font: 600 15px var(--f-panel); letter-spacing: .03em; overflow-wrap: anywhere; }
 .lib-row .desc { color: var(--silk-dim); font-size: 13.5px; }
 .lib-row .desc .miss { color: var(--warn); font-size: 12.5px; display: block; font-family: var(--f-mono); }
+.lib-row .desc .miss.blank { color: var(--silk-dim); }
 .lib-row .acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .lib-row .lamp { width: 14px; height: 14px; }
 

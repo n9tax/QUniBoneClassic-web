@@ -940,7 +940,8 @@ function renderLibrary() {
       el("div", {}, el("b", { text: s.name }), s.cpu ? el("span", { class: "tag", text: "CPU" }) : null,
         s.mode === "m" ? el("span", { class: "tag", text: "MEMORY TEST" }) : null),
       el("div", { class: "desc" }, s.title || "",
-        s.missing.length ? el("span", { class: "miss", text: "missing: " + s.missing.join(", ") }) : null),
+        s.missing.length ? el("span", { class: "miss", text: "missing: " + s.missing.join(", ") }) : null,
+        (s.blank || []).length ? el("span", { class: "miss blank", text: "created blank on start: " + s.blank.join(", ") }) : null),
       el("div", { class: "acts" },
         el("button", { class: "key small-key key-start", onclick: () => startTarget("stock:" + s.id) }, "START"),
         el("button", { class: "key small-key", onclick: async () => {

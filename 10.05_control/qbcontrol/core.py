@@ -664,7 +664,7 @@ def parse_stock_script(path):
             rundir = d
     info = {"name": os.path.basename(path)[:-3], "title": title, "path": path,
             "rundir": rundir, "cmdfile": cmdfile, "mode": "d", "images": [], "loaders": [],
-            "missing": []}
+            "missing": [], "blank": []}
     cmdpath = os.path.join(rundir, cmdfile) if cmdfile else ""
     if not (cmdpath and os.path.exists(cmdpath)):
         cmdpath = os.path.join(os.path.dirname(path), cmdfile) if cmdfile else ""
@@ -691,7 +691,13 @@ def parse_stock_script(path):
         for img in info["images"] + info["loaders"]:
             p = img if os.path.isabs(img) else os.path.join(rundir, img)
             if not (os.path.exists(p) or os.path.exists(p + ".gz")):
-                info["missing"].append(img)
+                # demo creates a missing disk image as an empty file: fine for
+                # the scratch disks of the stock scripts, which are not on
+                # files.retrocmp.com
+                if img in info["images"] and "scratch" in os.path.basename(img).lower():
+                    info["blank"].append(img)
+                else:
+                    info["missing"].append(img)
     elif cmdfile:
         info["missing"].append(cmdfile)
     info["cpu"] = info["mode"] == "dc"
