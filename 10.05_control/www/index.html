@@ -183,7 +183,9 @@
             <option value="16">16 bit – LSI-11, 11/03</option>
             <option value="18">18 bit – 11/23 in 18-bit backplane</option>
             <option value="22">22 bit – 11/23+, 11/53, 11/73, 11/83, 11/93</option>
-          </select></label>
+          </select>
+          <small class="hint">Must match the CPU. If it is wrong, the PDP-11 cannot reach the emulated
+            controllers: a boot loader started at 10000 drops back to ODT with <code>000002</code>.</small></label>
       </div>
       <div class="row2">
         <label class="field"><span>Web panel port (after daemon restart)</span><input id="set-port" type="number" min="1" max="65535"></label>
