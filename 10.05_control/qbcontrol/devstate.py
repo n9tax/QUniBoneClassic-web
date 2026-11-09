@@ -48,6 +48,7 @@ PARAM_ALIASES = {
     "pwr": "powerswitch",
     "shd": "shared_dir",
     "shfs": "shared_filesystem",
+    "if": "interface",
 }
 
 
@@ -191,10 +192,14 @@ def device_list(model, platform):
                        "info": " ".join(x for x in (p.get("serialport", ""),
                                                     p.get("baudrate", "")) if x)})
     others.append({"key": "kw11", "label": "KW11 line clock", "on": model.is_on("kw11"), "info": ""})
+    for n in cat.get("network", []):
+        p = model.params.get(n["key"], {})
+        others.append({"key": n["key"], "label": n["label"] + " Ethernet", "on": model.is_on(n["key"]),
+                       "info": " ".join(x for x in (p.get("interface", ""), p.get("mac", "")) if x)})
     return {"controllers": ctrls, "others": others, "current": model.current}
 
 
-SIMPLE_DEVICES = ("dl11", "dl11b", "kw11")
+SIMPLE_DEVICES = ("dl11", "dl11b", "kw11", "delqa")
 
 
 def _find(platform, name):

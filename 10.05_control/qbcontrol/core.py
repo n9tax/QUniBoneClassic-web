@@ -246,6 +246,12 @@ def catalog(platform):
         {"key": "dl11b", "label": "DL11 2nd SLU (TU58)", "address": "776500",
          "default_port": "ttyS1", "default_baud": 38400},
     ]
+    # Ethernet. DELQA is a QBUS card; the UniBone has no Ethernet device yet.
+    network = []
+    if q:
+        network.append({"key": "delqa", "label": "DELQA", "title": "Ethernet (DEQNA compatible)",
+                        "address": "17774440", "vector": "120 (set by the driver)",
+                        "default_interface": "eth0"})
     boot_files = []
     if os.path.isdir(BOOT_DIR):
         boot_files = sorted(f for f in os.listdir(BOOT_DIR) if f.endswith(".lst"))
@@ -254,6 +260,7 @@ def catalog(platform):
         "bus": "QBUS" if q else "UNIBUS",
         "controllers": ctrls,
         "serial": serial,
+        "network": network,
         "shared_filesystems": SHARED_FILESYSTEMS,
         "cpu20": not q,              # emulated PDP-11/20 CPU, UNIBUS only
         "address_widths": [16, 18, 22] if q else [18],
@@ -305,6 +312,9 @@ def new_builder_config(name, platform):
             "dl11": {"enabled": False, "port": "ttyS2", "baud": 9600},
             "dl11b": {"enabled": False, "port": "ttyS1", "baud": 38400},
             "kw11": False,
+        },
+        "network": {
+            "delqa": {"enabled": False, "interface": "eth0", "mac": ""},
         },
         "extra_commands": "",
         "notes": "",
@@ -450,6 +460,21 @@ def _generate_cmd(cfg, platform, cid):
                 add("p baudrate %d" % int(s["baud"]))
     if ser.get("kw11"):
         add("en kw11\t\t\t# KW11 line clock")
+
+    net = (cfg.get("network") or {}).get("delqa") or {}
+    if net.get("enabled"):
+        if not cat["network"]:
+            raise QbcError("The DELQA Ethernet controller exists only on QBUS (QBone)")
+        add("sd delqa\t\t# DELQA Ethernet")
+        add("p interface %s" % _tok(net.get("interface") or "eth0", "Network interface"))
+        mac = (net.get("mac") or "").strip()
+        if mac:
+            if not re.match(r"^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$", mac):
+                raise QbcError("MAC address must look like 08:00:2b:12:34:56")
+            if int(mac[0:2], 16) & 1:
+                raise QbcError("MAC address must be a unicast address (first byte even)")
+            add("p mac %s" % mac)
+        add("en delqa")
 
     if cfg.get("power_cycle", True):
         add("pwr\t\t\t# power cycle / reset PDP-11")

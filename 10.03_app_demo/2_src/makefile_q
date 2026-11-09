@@ -128,6 +128,9 @@ OBJECTS = $(OBJDIR)/application.o	\
 	$(OBJDIR)/rs232.o \
 	$(OBJDIR)/rs232adapter.o \
 	$(OBJDIR)/dl11w.o \
+	$(OBJDIR)/delqa.o \
+	$(OBJDIR)/delqa_core.o \
+	$(OBJDIR)/ethernet_raw.o \
 	$(OBJDIR)/storageimage.o	\
 	$(OBJDIR)/storagedrive.o	\
     $(OBJDIR)/storagecontroller.o	\
@@ -272,6 +275,15 @@ $(OBJDIR)/rl0102.o :  $(DEVICE_SRC_DIR)/rl0102.cpp $(DEVICE_SRC_DIR)/rl0102.hpp
 	$(CC) $(CCFLAGS) $< -o $@
 
 $(OBJDIR)/rl11.o :  $(DEVICE_SRC_DIR)/rl11.cpp $(DEVICE_SRC_DIR)/rl11.hpp
+	$(CC) $(CCFLAGS) $< -o $@
+
+$(OBJDIR)/delqa.o :  $(DEVICE_SRC_DIR)/delqa.cpp $(DEVICE_SRC_DIR)/delqa.hpp $(DEVICE_SRC_DIR)/delqa_core.hpp $(DEVICE_SRC_DIR)/ethernet_raw.hpp
+	$(CC) $(CCFLAGS) $< -o $@
+
+$(OBJDIR)/delqa_core.o :  $(DEVICE_SRC_DIR)/delqa_core.cpp $(DEVICE_SRC_DIR)/delqa_core.hpp
+	$(CC) $(CCFLAGS) $< -o $@
+
+$(OBJDIR)/ethernet_raw.o :  $(DEVICE_SRC_DIR)/ethernet_raw.cpp $(DEVICE_SRC_DIR)/ethernet_raw.hpp
 	$(CC) $(CCFLAGS) $< -o $@
 
 $(OBJDIR)/rk05.o :  $(DEVICE_SRC_DIR)/rk05.cpp $(DEVICE_SRC_DIR)/rk05.hpp

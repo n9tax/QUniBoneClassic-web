@@ -5,8 +5,10 @@ emulations on a QBone or UniBone, without hand-editing scripts.
 
 * **Web panel** on port **1170** (as in PDP-11/70): choose controllers and drives,
   press START, and watch the `demo` console on a VT220-style screen.
-* **Live devices**: switch controllers, drives, serial lines and the line
-  clock on and off while the emulation runs; spin RL drives up and down, set
+* **Ethernet** (QBone): a DELQA in the NETWORK section of a configuration
+  puts the PDP-11 on your LAN, see [DELQA.md](../10.02_devices/DELQA.md).
+* **Live devices**: switch controllers, drives, serial lines, the line
+  clock and the DELQA on and off while the emulation runs; spin RL drives up and down, set
   write protect, change or unload disk images.
 * **`qbmenu`**: the same functions as a text menu for ssh or the serial
   console. After `install.sh` it comes up by itself when you log in.
@@ -62,6 +64,8 @@ qbmenu ──HTTP───┘
   appear in the LIBRARY, with a lamp showing whether their disk images are present.
   They run `demo` directly with the same working directory and command file
   as their `.sh` wrapper.
+* A configuration with the DELQA switched on adds `sd delqa`, `p interface eth0`,
+  an optional `p mac …` and `en delqa` to the command file.
 * `demo` runs on a pseudo-terminal. Once its command file is done, it reads the
   console, which the web panel and `qbmenu` both share. Ctrl-C is not passed
   through, so a stray key can't kill `demo` while it drives the bus.
@@ -78,6 +82,7 @@ running `demo`. Each button types the same commands you would type at the
 | Button | Commands |
 |---|---|
 | controller on / off | `en rl` / `dis rl` (RX: also `rxbox` and its power switch) |
+| DELQA, DL11, KW11 on / off | `en delqa` / `dis delqa` (DELQA uses its `interface` and `mac` parameters) |
 | drive on / off | `en rl1` (RL: plus `p powerswitch 1`) / `dis rl1` |
 | RUN / LOAD (RL) | `sd rl0`, `p runstopbutton 1` / `0` |
 | WP (RL) | `sd rl0`, `p writeprotectbutton 1` / `0` |

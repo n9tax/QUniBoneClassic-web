@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # arg 1: Branch. "master", if none
-GITREPO=QUniBone/QUniBoneClassic
+# GITREPO=owner/repo ./update-code.sh <branch>  takes the sources from a fork
+GITREPO=${GITREPO:-QUniBone/QUniBoneClassic}
 GITBRANCH=master
 if [ ! -z "$1" ] ; then
     GITBRANCH=$1

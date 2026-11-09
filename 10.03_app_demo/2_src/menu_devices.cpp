@@ -60,6 +60,9 @@
 #include "rx11211.hpp"
 #include "uda.hpp"
 #include "dl11w.hpp"
+#if defined(QBUS)
+#include "delqa.hpp"
+#endif
 #include "ke11.hpp"
 #if defined(UNIBUS)
 #include "m9312.hpp"
@@ -231,6 +234,8 @@ void application_c::menu_devices(const char *menu_code, bool with_emulated_CPU)
 #elif defined(QBUS)
     RXV11_c *RX11 = new RXV11_c() ;
     RXV21_c *RX211 = new RXV21_c() ;
+    // Ethernet: "sd delqa", "p interface eth0", "en delqa"
+    delqa_c *DELQA = new delqa_c() ;
 #endif
     //	//demo_regs.install();
     //	//demo_regs.worker_start();
@@ -657,6 +662,11 @@ void application_c::menu_devices(const char *menu_code, bool with_emulated_CPU)
     KE11A->enabled.set(false);
     delete KE11A;
 
+#endif
+
+#if defined(QBUS)
+    DELQA->enabled.set(false) ;
+    delete DELQA;
 #endif
 
     RX11->enabled.set(false) ;

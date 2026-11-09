@@ -569,6 +569,10 @@ function normalizeBuilder(cfg) {
     cfg.serial[k] = cfg.serial[k] || { enabled: false, port: def.default_port, baud: def.default_baud };
   });
   if (cfg.serial.kw11 === undefined) cfg.serial.kw11 = false;
+  cfg.network = cfg.network || {};
+  (cat.network || []).forEach((n) => {
+    cfg.network[n.key] = Object.assign({ enabled: false, interface: n.default_interface, mac: "" }, cfg.network[n.key] || {});
+  });
   return cfg;
 }
 
@@ -715,6 +719,29 @@ function builderSections(cfg) {
     el("div", { class: "unit-head" }, el("h2", { text: "SERIAL LINES & CLOCK" }), el("span", { class: "silk-dim", text: "emulated DL11 on a BeagleBone UART" })),
     serRows,
     el("div", { class: "toggle-row" }, paddle(ser, "kw11", "KW11 line clock", "50/60 Hz LTC interrupts", { violet: true }))));
+
+  // --- network (QBUS only)
+  if ((cat.network || []).length) {
+    const netRows = cat.network.map((n) => {
+      const o = cfg.network[n.key];
+      return el("div", { class: "rack" + (o.enabled ? " on" : "") },
+        el("div", { class: "rack-head" }, el("i", { class: "screw" }),
+          el("label", { class: "sw v" }, el("input", { type: "checkbox", checked: o.enabled, "aria-label": "Enable " + n.label,
+            onchange: (ev) => { o.enabled = ev.target.checked; changed(); renderEditor(); } }), el("i", { class: "pad" })),
+          el("span", { class: "model", text: n.label }), el("span", { class: "title", text: n.title }),
+          el("span", { class: "addr", text: n.address }), el("i", { class: "screw" })),
+        o.enabled ? el("div", { class: "rack-body" },
+          el("div", { class: "row2" },
+            field("BeagleBone network interface", bindText(o, "interface", { placeholder: n.default_interface })),
+            field("Station (MAC) address", bindText(o, "mac", { placeholder: "automatic: 08:00:2b:… from the BeagleBone" }))),
+          el("p", { class: "hint" }, "The PDP-11 joins your LAN as its own host. Other machines and the internet can reach it; ",
+            "the BeagleBone itself cannot, because frames it sends never come back in on the same port. Vector ",
+            el("code", { text: "120" }), " is set by the PDP-11 driver.")) : null);
+    });
+    out.push(el("section", { class: "unit" },
+      el("div", { class: "unit-head" }, el("h2", { text: "NETWORK" }), el("span", { class: "silk-dim", text: "Ethernet on the BeagleBone's network port" })),
+      netRows));
+  }
 
   // --- boot
   const boot = cfg.boot;

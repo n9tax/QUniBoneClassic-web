@@ -2,3 +2,6 @@
 .qbcontrol/
 __pycache__/
 *.pyc
+
+# DELQA PC test binary
+10.02_devices/3_test/delqa/delqa_test
