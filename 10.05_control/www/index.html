@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QBone Control Panel</title>
+<meta name="color-scheme" content="dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%237d1f3a'/%3E%3Ctext x='8' y='12.5' font-family='Arial' font-weight='700' font-size='12' fill='white' text-anchor='middle'%3Eq%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<div class="chassis">
+
+  <header class="panel-top">
+    <div class="brand">
+      <div class="logo" aria-label="qbone"><span>q</span><span>b</span><span>o</span><span>n</span><span>e</span></div>
+      <div class="brand-text">
+        <div class="brand-title">CONTROL PANEL</div>
+        <div class="brand-sub" id="brand-sub">PDP-11 BUS EMULATOR</div>
+      </div>
+    </div>
+    <div class="lamps" id="lamps">
+      <div class="lamp-cell"><i class="lamp" id="lamp-run"></i><span>RUN</span></div>
+      <div class="lamp-cell"><i class="lamp" id="lamp-stop"></i><span>HALT</span></div>
+      <div class="lamp-cell"><i class="lamp amber" id="lamp-auto"></i><span>AUTO</span></div>
+      <div class="lamp-cell"><i class="lamp white" id="lamp-link"></i><span>LINK</span></div>
+      <div class="lamp-cell bus"><b id="bus-label">----</b><span id="bus-sub">BUS</span></div>
+    </div>
+  </header>
+
+  <nav class="switchbar" id="nav" aria-label="Sections">
+    <button class="paddle-nav g0" data-view="operate"><i></i><span>OPERATE</span></button>
+    <button class="paddle-nav g0" data-view="configure"><i></i><span>CONFIGURE</span></button>
+    <button class="paddle-nav g0" data-view="library"><i></i><span>LIBRARY</span></button>
+    <button class="paddle-nav g1" data-view="autostart"><i></i><span>AUTOSTART</span></button>
+    <button class="paddle-nav g1" data-view="system"><i></i><span>SYSTEM</span></button>
+  </nav>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <!-- ============================== OPERATE ============================== -->
+  <main class="view" id="view-operate">
+    <section class="unit status-unit">
+      <div class="unit-head"><h2>EMULATION</h2><span class="silk-dim" id="op-uptime"></span></div>
+      <div class="status-block">
+        <div class="big-state" id="op-state">HALT</div>
+        <div class="op-label" id="op-label">Nothing running</div>
+        <div class="op-meta" id="op-meta"></div>
+      </div>
+      <label class="field">
+        <span>Configuration to start</span>
+        <select id="op-target"></select>
+      </label>
+      <div class="btn-row">
+        <button class="key key-start" id="btn-start">START</button>
+        <button class="key key-stop" id="btn-stop">STOP</button>
+        <button class="key" id="btn-restart">RESTART</button>
+      </div>
+      <div class="btn-row small">
+        <button class="key key-kill" id="btn-kill" title="Hard stop with SIGTERM/SIGKILL, if demo hangs">KILL</button>
+        <button class="key" id="btn-showcmd">.CMD FILE</button>
+      </div>
+      <div class="quick" id="op-quick"></div>
+    </section>
+
+    <section class="unit crt-unit">
+      <div class="unit-head"><h2>CONSOLE</h2>
+        <div class="phosphor" role="radiogroup" aria-label="Phosphor colour">
+          <button data-ph="amber" title="Amber phosphor">A</button>
+          <button data-ph="green" title="Green phosphor">G</button>
+          <button data-ph="white" title="White phosphor">W</button>
+        </div>
+      </div>
+      <div class="crt-bezel">
+        <div class="crt ph-amber" id="crt">
+          <pre class="crt-text" id="crt-text" aria-live="off"></pre>
+          <form class="crt-input" id="crt-form" autocomplete="off">
+            <span class="prompt">&gt;</span>
+            <input id="crt-in" spellcheck="false" autocapitalize="off" aria-label="Command to demo">
+          </form>
+        </div>
+      </div>
+      <div class="keypad" id="keypad">
+        <button class="cap" data-cmd="ld" title="List devices">LD</button>
+        <button class="cap" data-cmd="p" title="Parameters of current device">P</button>
+        <button class="cap" data-cmd="init" title="Pulse bus INIT">INIT</button>
+        <button class="cap" data-cmd="pwr" title="Power cycle the PDP-11">PWR</button>
+        <button class="cap qbus-only" data-cmd="h 1" title="Assert QBUS HALT">HALT 1</button>
+        <button class="cap qbus-only" data-cmd="h 0" title="Release QBUS HALT">HALT 0</button>
+        <button class="cap" data-cmd="m ll" title="Reload boot loader">M LL</button>
+        <button class="cap dark" id="crt-clear" title="Clear screen">CLR</button>
+        <button class="cap dark" id="crt-help" title="Show menu help">HELP</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================== CONFIGURE ============================== -->
+  <main class="view" id="view-configure" hidden>
+    <aside class="unit cfg-list-unit">
+      <div class="unit-head"><h2>MY CONFIGURATIONS</h2></div>
+      <div class="cfg-list" id="cfg-list"></div>
+      <div class="btn-row">
+        <button class="key" id="btn-new">NEW</button>
+        <button class="key" id="btn-new-raw" title="Hand written command file">NEW RAW</button>
+      </div>
+      <p class="hint">A configuration says which controllers and drives to emulate. The panel turns it into a
+        <code>demo --cmdfile</code> command file, shown as a printout below the editor.</p>
+    </aside>
+    <section class="cfg-editor" id="cfg-editor">
+      <div class="unit empty-editor">
+        <p>Select a configuration, or press <b>NEW</b>.</p>
+        <p class="hint">Tip: the <b>LIBRARY</b> lists the stock scripts from files.retrocmp.com; any of them can be copied into an editable configuration.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================== LIBRARY ============================== -->
+  <main class="view" id="view-library" hidden>
+    <section class="unit wide">
+      <div class="unit-head"><h2>STOCK APPLICATION SCRIPTS</h2><span class="silk-dim" id="lib-dir"></span></div>
+      <div id="lib-list"></div>
+    </section>
+  </main>
+
+  <!-- ============================== AUTOSTART ============================== -->
+  <main class="view" id="view-autostart" hidden>
+    <section class="unit">
+      <div class="unit-head"><h2>AUTOSTART AT BOOT</h2></div>
+      <p class="hint">When the BeagleBone boots, the control daemon starts this emulation by itself.</p>
+      <div class="mode-switches" id="as-mode" role="radiogroup" aria-label="Autostart mode">
+        <button class="paddle g0" data-mode="off"><i class="lamp"></i><b></b><span>OFF</span></button>
+        <button class="paddle g0" data-mode="fixed"><i class="lamp"></i><b></b><span>FIXED</span></button>
+        <button class="paddle g1" data-mode="switches"><i class="lamp"></i><b></b><span>DIP SWITCHES</span></button>
+      </div>
+      <div id="as-fixed">
+        <label class="field"><span>Always start</span><select id="as-target"></select></label>
+      </div>
+      <div class="row2">
+        <label class="field"><span>Delay after boot (s)</span><input id="as-delay" type="number" min="0" max="600"></label>
+        <label class="check" id="as-leds-wrap"><input type="checkbox" id="as-leds"><span>Show switch value on the 4 board LEDs</span></label>
+      </div>
+      <div class="would" id="as-would"></div>
+      <div class="btn-row">
+        <button class="key key-start" id="as-save">SAVE</button>
+        <button class="key" id="as-run" title="Run the autostart logic now">RUN NOW</button>
+      </div>
+    </section>
+    <section class="unit" id="as-switch-unit">
+      <div class="unit-head"><h2>SWITCH SELECTION</h2><span class="silk-dim">user switches SW0–SW3 on the board</span></div>
+      <div class="dip" id="as-dip" aria-label="Current DIP switch setting"></div>
+      <p class="hint">Set the DIP switches before power-on to choose what boots: value 0 starts nothing.
+        The highlighted row is the current setting.</p>
+      <div class="switch-map" id="as-map"></div>
+    </section>
+  </main>
+
+  <!-- ============================== SYSTEM ============================== -->
+  <main class="view" id="view-system" hidden>
+    <section class="unit">
+      <div class="unit-head"><h2>SETTINGS</h2></div>
+      <div class="row2">
+        <label class="field"><span>Bus platform</span>
+          <select id="set-platform">
+            <option value="auto">Auto (qunibone-platform.env)</option>
+            <option value="QBUS">QBUS – QBone</option>
+            <option value="UNIBUS">UNIBUS – UniBone</option>
+          </select></label>
+        <label class="field" id="set-aw-wrap"><span>QBUS CPU address width (demo --aw)</span>
+          <select id="set-aw">
+            <option value="16">16 bit – LSI-11, 11/03</option>
+            <option value="18">18 bit – 11/23 in 18-bit backplane</option>
+            <option value="22">22 bit – 11/23+, 11/53, 11/73, 11/83, 11/93</option>
+          </select></label>
+      </div>
+      <div class="row2">
+        <label class="field"><span>Web panel port (after daemon restart)</span><input id="set-port" type="number" min="1" max="65535"></label>
+        <label class="check"><input type="checkbox" id="set-verbose"><span>Verbose demo output (--verbose)</span></label>
+      </div>
+      <label class="field"><span>Extra image directories, one per line</span><textarea id="set-imgdirs" rows="3" spellcheck="false"></textarea></label>
+      <div class="row2">
+        <label class="field"><span>Panel password (empty = none)</span><input id="set-pw" type="password" autocomplete="new-password" placeholder="unchanged"></label>
+        <label class="check"><input type="checkbox" id="set-pw-clear"><span>Remove password</span></label>
+      </div>
+      <div class="btn-row"><button class="key key-start" id="set-save">SAVE</button></div>
+    </section>
+    <section class="unit">
+      <div class="unit-head"><h2>INSTALLATION</h2></div>
+      <dl class="facts" id="sys-facts"></dl>
+      <div class="unit-head sub"><h2>DAEMON LOG</h2><button class="key small-key" id="sys-log-refresh">REFRESH</button></div>
+      <div class="printout"><pre id="sys-log"></pre></div>
+    </section>
+  </main>
+
+  <footer class="panel-foot">
+    <span>qbcontrol <b id="foot-ver"></b></span>
+    <span id="foot-host"></span>
+    <span class="silk-dim">QUniBone by J. Hoppe · retrocmp.com</span>
+  </footer>
+</div>
+
+<!-- image picker / printout dialogs -->
+<dialog id="dlg-images" class="dlg">
+  <div class="unit-head"><h2>SELECT DISK IMAGE</h2><button class="key small-key" data-close>CLOSE</button></div>
+  <input id="img-filter" class="filter" placeholder="Filter, e.g. rl02 or rt11" spellcheck="false">
+  <div class="img-list" id="img-list"></div>
+  <p class="hint" id="img-hint"></p>
+</dialog>
+
+<dialog id="dlg-print" class="dlg wide">
+  <div class="unit-head"><h2 id="print-title">COMMAND FILE</h2><button class="key small-key" data-close>CLOSE</button></div>
+  <div class="printout tall"><pre id="print-body"></pre></div>
+</dialog>
+
+<dialog id="dlg-confirm" class="dlg narrow">
+  <div class="unit-head"><h2 id="confirm-title">CONFIRM</h2></div>
+  <p id="confirm-text"></p>
+  <div class="btn-row">
+    <button class="key key-stop" id="confirm-yes">YES</button>
+    <button class="key" id="confirm-no">NO</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

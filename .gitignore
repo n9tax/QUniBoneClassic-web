@@ -1,0 +1,4 @@
+# qbcontrol: panel data and Python bytecode
+.qbcontrol/
+__pycache__/
+*.pyc

@@ -1,0 +1,22 @@
+# systemd unit for the QBone/UniBone control panel.
+# install.sh copies this to /etc/systemd/system/ and fills in @CONTROL_DIR@.
+
+[Unit]
+Description=QBone/UniBone control panel (qbcontrold, web panel on port 1170)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=@CONTROL_DIR@
+ExecStart=/usr/bin/python3 @CONTROL_DIR@/qbcontrold
+Environment=PYTHONUNBUFFERED=1
+# Only the daemon gets SIGTERM; it then leaves the demo menus with "q" so the
+# PRU and the bus drivers are shut down properly before demo exits.
+KillMode=process
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

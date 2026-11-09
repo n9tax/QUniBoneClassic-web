@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+# qbcontrold - QBone/UniBone control panel daemon (web panel + API).
+# Usually started by systemd (qbcontrol.service), see README.md.
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from qbcontrol.server import main
+main()
