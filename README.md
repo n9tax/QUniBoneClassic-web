@@ -16,29 +16,37 @@ program. This fork adds an easier way to run it, and an Ethernet controller.
 
 The changes are on the branch [`control-panel`](https://github.com/n9tax/QUniBoneClassic-web/tree/control-panel).
 
-## Installing on the BeagleBone
+## Installing and updating on the BeagleBone
 
-Log in as root, in the home directory that holds the QUniBone software. This
-replaces the sources with this fork's and recompiles `demo`, just like
-`./update-code.sh` does with the original repository:
-
-```sh
-GITREPO=n9tax/QUniBoneClassic-web ./update-code.sh control-panel
-```
-
-On an older tree whose `update-code.sh` ignores `GITREPO`, download it by hand:
+Log in as root. In the home directory that holds the QUniBone software, fetch
+the update script once:
 
 ```sh
-wget https://github.com/n9tax/QUniBoneClassic-web/archive/control-panel.tar.gz
-tar xzf control-panel.tar.gz --strip-components=1
-./compile.sh
+cd ~
+wget https://raw.githubusercontent.com/n9tax/QUniBoneClassic-web/control-panel/qbweb-update.sh
+chmod +x qbweb-update.sh
 ```
 
-Then install the control panel:
+Then, now and for every later update:
+
+```sh
+./qbweb-update.sh
+```
+
+It downloads this fork, shows which files changed and copies them in, keeping
+the previous versions in `~/.qbweb-backup/`. It recompiles `demo` when its
+sources changed, and restarts the control panel when that changed. Disk images,
+the stock scripts and your panel configurations are left alone. `-n` only shows
+what would change, `-y` skips the question, and `-a` recompiles everything.
+
+The first time, also install the control panel:
 
 ```sh
 cd ~/10.05_control && ./install.sh
 ```
+
+(`GITREPO=n9tax/QUniBoneClassic-web ./update-code.sh control-panel` works too,
+but it unpacks and recompiles everything each time.)
 
 Open `http://<beaglebone>:1170/` in a browser, or type `qbmenu`. If your
 `~/.profile` starts `./autostart.sh` in a `screen` session, remove that line
