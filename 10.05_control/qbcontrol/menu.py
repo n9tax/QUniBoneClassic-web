@@ -434,6 +434,122 @@ def do_autostart(c):
             pause()
 
 
+# ---------------------------------------------------------------------------
+# Live devices: switch controllers and drives of the running demo
+# ---------------------------------------------------------------------------
+
+def device_rows(d):
+    """Numbered rows: (device name, kind, text) for the devices screen."""
+    rows = []
+    for ctl in d["controllers"]:
+        rows.append((ctl["key"], "ctrl", ctl))
+        if not ctl["on"]:
+            continue
+        for drv in ctl["drives"]:
+            if drv["known"] or drv["on"]:
+                rows.append((drv["name"], "drive", (ctl, drv)))
+    for o in d["others"]:
+        rows.append((o["key"], "other", o))
+    return rows
+
+
+def onoff(on):
+    return bold("ON ") if on else dim("off")
+
+
+def pick_image(c, dev):
+    """Ask for an image: a path, or search text to pick from the image list."""
+    s = ask("  Image file (path, or part of a name to search; RETURN = cancel): ")
+    if not s:
+        return None
+    if s.startswith("/") or os.path.exists(s):
+        return s
+    imgs = [i for i in c.get("/api/images", timeout=60)["images"] if s.lower() in i["path"].lower()]
+    if not imgs:
+        print("  No image matches \"%s\"." % s)
+        pause()
+        return None
+    for n, i in enumerate(imgs[:30], 1):
+        print("   %2d  %-30s %s" % (n, i["name"], dim(i["dir"].replace(core.QUNIBONE_HOME, "~", 1))))
+    if len(imgs) > 30:
+        print(dim("   ... %d more, search more precisely" % (len(imgs) - 30)))
+    k = ask("  Number: ")
+    if k.isdigit() and 1 <= int(k) <= min(30, len(imgs)):
+        return imgs[int(k) - 1]["path"]
+    return None
+
+
+def do_devices(c):
+    msg = ""
+    while True:
+        d = c.get("/api/devices")
+        rows = device_rows(d)
+        clear()
+        print()
+        state = ("LIVE  demo prompt %s>>>" % d["menu"]) if d["ready"] else ("WAIT" if d["running"] else "")
+        print("  " + bold("DEVICES") + "   " + state + dim("   " + (d.get("label") or "")))
+        print()
+        if d.get("reason"):
+            print("   " + d["reason"])
+            print()
+        for n, (name, kind, x) in enumerate(rows, 1):
+            if kind == "ctrl":
+                print("   %2d  %-12s %s  %s" % (n, x["label"], onoff(x["on"]), dim(x["title"])))
+            elif kind == "drive":
+                ctl, drv = x
+                flags = ""
+                if ctl["rl_buttons"] and drv["on"]:
+                    flags = ("RUN " if drv["run"] else "LOAD") + (" WP" if drv["writeprotect"] else "   ")
+                media = os.path.basename(drv["image"]) if drv["image"] else dim("no media")
+                print("   %2d    %-10s %s  %-7s  %s" % (n, drv["name"], onoff(drv["on"]), flags, media if drv["on"] else ""))
+            else:
+                print("   %2d  %-20s %s  %s" % (n, x["label"], onoff(x["on"]), dim(x.get("info", ""))))
+        print()
+        print("   <n> or <name>  switch on/off   (any drive by name, e.g. rk3)")
+        print("   R <n>  RUN/LOAD (RL)   W <n>  write protect (RL)")
+        print("   I <n>  change image    U <n>  unload image     RETURN  back")
+        if msg:
+            print()
+            print("   " + msg)
+            msg = ""
+        k = ask("  > ").strip()
+        if not k:
+            return
+        f = k.split()
+        verb = f[0].lower() if len(f) == 2 and f[0].lower() in ("r", "w", "i", "u") else ""
+        ref = f[1] if verb else k
+        if ref.isdigit() and 1 <= int(ref) <= len(rows):
+            name, kind, x = rows[int(ref) - 1]
+        else:
+            name = ref.lower()
+            found = [r for r in rows if r[0] == name]
+            kind, x = (found[0][1], found[0][2]) if found else ("drive", None)
+        try:
+            if not verb:
+                if kind == "ctrl" or kind == "other":
+                    on = x["on"]
+                elif x is not None:
+                    on = x[1]["on"]
+                else:
+                    on = False       # drive not listed yet: switch it on
+                action = "off" if on else "on"
+                c.post("/api/devices", {"device": name, "action": action})
+            elif verb == "r":
+                run = x is not None and kind == "drive" and x[1].get("run")
+                c.post("/api/devices", {"device": name, "action": "load" if run else "run"})
+            elif verb == "w":
+                wp = x is not None and kind == "drive" and x[1].get("writeprotect")
+                c.post("/api/devices", {"device": name, "action": "wpoff" if wp else "wp"})
+            elif verb == "u":
+                c.post("/api/devices", {"device": name, "action": "image", "value": ""})
+            elif verb == "i":
+                img = pick_image(c, name)
+                if img:
+                    c.post("/api/devices", {"device": name, "action": "image", "value": img})
+        except core.QbcError as e:
+            msg = rev(" ERROR ") + " " + str(e)
+
+
 def do_show(c):
     st = c.get("/api/status")["runner"]
     p = st.get("cmdfile")
@@ -471,6 +587,7 @@ def main_menu(c):
         print("    4  Autostart ...")
         print("    5  Restart last       " + dim(st["runner"].get("label") or ""))
         print("    6  Show command file")
+        print("    7  Devices ...        " + dim("switch controllers and drives of the running emulation"))
         print("    K  Kill emulation     " + dim("hard stop, if demo hangs"))
         print("    X  Exit to shell")
         print()
@@ -488,6 +605,8 @@ def main_menu(c):
                 do_restart(c)
             elif k == "6":
                 do_show(c)
+            elif k == "7":
+                do_devices(c)
             elif k == "k":
                 if ask("  Kill demo without leaving the menus? [y/N] ").lower() == "y":
                     do_stop(c, force=True)
@@ -502,9 +621,11 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     c = Client()
     if argv and argv[0] in ("-h", "--help"):
-        print("qbmenu [status|start <target>|stop|console|autostart]")
+        print("qbmenu [status|start <target>|stop|console|autostart|devices|dev <device> <action> [value]]")
         print("  without arguments: interactive menu")
         print("  target: config:<id> or stock:<path below 5_applications>")
+        print("  dev:    qbmenu dev rk on | dev rl0 run | dev rl0 load | dev rl0 wp | dev rl0 wpoff")
+        print("          qbmenu dev rl1 image /root/disks/x.rl02 | dev rl1 image   (unload)")
         return 0
     if not ensure_daemon(c):
         return 1
@@ -523,6 +644,20 @@ def main(argv=None):
             wait_stopped(c)
         elif cmd == "console":
             attach(c)
+        elif cmd == "devices":
+            d = c.get("/api/devices")
+            if d.get("reason"):
+                print(d["reason"])
+            for name, kind, x in device_rows(d):
+                if kind == "drive":
+                    ctl, drv = x
+                    print("  %-6s %-3s %s" % (name, "on" if drv["on"] else "off", drv["image"]))
+                else:
+                    print("%-8s %-3s %s" % (name, "on" if x["on"] else "off", x.get("label", "")))
+        elif cmd == "dev" and len(argv) >= 3:
+            r = c.post("/api/devices", {"device": argv[1], "action": argv[2],
+                                        "value": argv[3] if len(argv) > 3 else ""})
+            print("sent: " + "; ".join(r.get("sent", [])))
         elif cmd == "autostart":
             r = c.post("/api/autostart/run", timeout=30)
             print(r.get("reason") or r)

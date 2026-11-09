@@ -123,7 +123,7 @@ function showView(v) {
   if (v === "configure") renderCfgList();
   if (v === "autostart") loadAutostart().catch(fail);
   if (v === "system") loadSystem().catch(fail);
-  if (v === "operate") setTimeout(() => $("#crt-in").focus(), 0);
+  if (v === "operate") { loadDevices(); setTimeout(() => $("#crt-in").focus(), 0); }
 }
 $$("#nav .paddle-nav").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
 
@@ -135,6 +135,7 @@ async function pollStatus() {
   try {
     S.status = await GET("status");
     renderStatus();
+    if (S.view === "operate" && !devBusy) await loadDevices();
   } catch (e) { /* link lamp shows it */ }
   setTimeout(pollStatus, 2000);
 }
@@ -287,6 +288,108 @@ $("#btn-showcmd").addEventListener("click", async () => {
     } catch (e) { fail(e); }
   }
 });
+
+// ------------------------------------------------------------------ live devices (OPERATE)
+// Switch controllers and drives of the running demo. The daemon turns each
+// button into device menu commands (en / dis / sd / p ...) and keeps track of
+// what is on.
+
+let DEV = null, devBusy = false;
+
+async function loadDevices() {
+  try { DEV = await GET("devices"); renderDevices(); } catch (e) { /* link lamp shows it */ }
+}
+
+async function devAction(device, action, value) {
+  if (devBusy) return;
+  devBusy = true;
+  try {
+    DEV = await POST("devices", { device, action, value });
+    renderDevices();
+  } catch (e) { fail(e); }
+  finally { devBusy = false; }
+}
+
+function catCtrl(key) { return S.catalog && S.catalog.controllers.find((c) => c.key === key); }
+
+function liveSwitch(on, label, sub, onToggle, opts) {
+  opts = opts || {};
+  const inp = el("input", { type: "checkbox", checked: on, "aria-label": opts.aria || label,
+    onchange: (ev) => { ev.target.checked = on; onToggle(!on); } });   // UI follows the daemon
+  return el("label", { class: "sw" + (opts.mini ? " mini" : "") + (opts.violet ? " v" : ""), title: opts.title || null },
+    inp, el("i", { class: "pad" }), label || sub ? el("span", { class: "txt" }, label, sub ? el("small", { text: sub }) : null) : null);
+}
+
+function baseName(p) { return p ? p.split("/").pop() : ""; }
+function shortDir(p) {
+  const home = S.status && S.status.home;
+  if (home && p.startsWith(home + "/")) p = "~" + p.slice(home.length);
+  return p.replace(/\/$/, "") || "/";
+}
+
+function liveDrive(c, d) {
+  const cc = catCtrl(c.key);
+  const acts = [];
+  if (c.rl_buttons && d.on) {
+    acts.push(el("button", { class: "rocker amber" + (!d.run ? " on" : ""), title: d.run ? "Spin down (LOAD)" : "Spin up (RUN)",
+      onclick: () => devAction(d.name, d.run ? "load" : "run") }, d.run ? "RUN" : "LOAD"));
+    acts.push(el("span", { class: "rocker white" + (d.run && d.image ? " on" : ""), title: "READY" }, "READY"));
+    acts.push(el("button", { class: "rocker amber" + (d.writeprotect ? " on" : ""), title: "WRITE PROTECT",
+      onclick: () => devAction(d.name, d.writeprotect ? "wpoff" : "wp") }, "WP"));
+  }
+  if (d.on) {
+    const spinning = c.rl_buttons && d.run;
+    acts.push(el("button", { class: "key", disabled: spinning, title: spinning ? "Press LOAD first" : "Mount another image",
+      onclick: () => pickImage(cc, (p) => devAction(d.name, "image", p)) }, d.image ? "CHANGE" : "MOUNT"));
+    if (d.image) acts.push(el("button", { class: "key", disabled: spinning, title: spinning ? "Press LOAD first" : "Unload the image",
+      onclick: () => devAction(d.name, "image", "") }, "UNLOAD"));
+  }
+  const sw = c.box ? null : liveSwitch(d.on, null, null, (v) => devAction(d.name, v ? "on" : "off"),
+    { mini: true, aria: d.name, title: (d.on ? "Switch off " : "Switch on ") + d.name });
+  const dir = d.on && d.image ? shortDir(d.image.slice(0, d.image.length - baseName(d.image).length)) : "";
+  return el("div", { class: "ldrive" + (d.on ? "" : " dark") },
+    el("div", { class: "unitno", text: d.name.toUpperCase() }),
+    el("div", { class: "media" },
+      el("b", { text: d.on ? (baseName(d.image) || "— no media —") : "OFF", title: d.image || null }),
+      el("small", { text: [d.type, dir].filter(Boolean).join(" · "), title: d.image || null })),
+    sw || el("span"),
+    acts.length ? el("div", { class: "acts" }, acts) : null);
+}
+
+function liveRack(c) {
+  const head = el("div", { class: "rack-head" },
+    el("i", { class: "screw" }),
+    liveSwitch(c.on, null, null, (v) => devAction(c.key, v ? "on" : "off"), { title: (c.on ? "Switch off " : "Switch on ") + c.label, aria: c.label }),
+    el("span", { class: "model", text: c.label }),
+    el("span", { class: "title", text: c.title }),
+    el("i", { class: "screw" }));
+  if (!c.on) return el("div", { class: "rack" }, head);
+  // drives mentioned by the command file or switched since, plus slots for the others
+  const shown = c.drives.filter((d) => d.known || d.on);
+  const free = c.box ? [] : c.drives.filter((d) => !(d.known || d.on));
+  const body = el("div", { class: "rack-body" },
+    shown.map((d) => liveDrive(c, d)),
+    free.length ? el("div", { class: "slots" }, el("span", { class: "label", text: "Switch on" }),
+      free.map((d) => el("button", { class: "slot-btn", onclick: () => devAction(d.name, "on") }, "+ " + d.name))) : null);
+  return el("div", { class: "rack on" }, head, body);
+}
+
+function renderDevices() {
+  if (!DEV) return;
+  const unit = $("#live-unit");
+  unit.classList.toggle("off", !DEV.ready);
+  $("#live-state").textContent = DEV.ready ? "LIVE · " + (DEV.menu || "D") + ">>>" : DEV.running ? "WAIT" : "";
+  const rs = $("#live-reason");
+  rs.textContent = DEV.reason || "";
+  rs.hidden = !DEV.reason;
+  // keep scroll / focus stable: only rebuild when something changed
+  const sig = JSON.stringify([DEV.ready, DEV.controllers, DEV.others]);
+  if (unit._sig === sig) return;
+  unit._sig = sig;
+  $("#live-racks").replaceChildren(...DEV.controllers.map(liveRack));
+  $("#live-others").replaceChildren(...DEV.others.map((o) =>
+    liveSwitch(o.on, o.label, o.info || (o.on ? "on" : "off"), (v) => devAction(o.key, v ? "on" : "off"), { violet: true })));
+}
 
 // ------------------------------------------------------------------ console (VT emulation, minimal)
 

@@ -437,6 +437,34 @@ input[type="checkbox"] { width: auto; }
 .drive .remove { margin-left: auto; }
 .drive .warn-line { font-size: 12.5px; color: #8b2b10; }
 
+/* live device panel (OPERATE) */
+.live-unit { grid-column: 1 / -1; }
+.live-unit.off .live-racks, .live-unit.off .live-others { opacity: .45; pointer-events: none; filter: saturate(.4); }
+.live-racks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 0 14px; align-items: start; }
+.live-racks .rack-head .model { min-width: 0; }
+.live-racks .rack-body { gap: 8px; }
+.ldrive {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  background: linear-gradient(180deg, #e9e2d1, #d4ccb8); color: #1d1b18;
+  border: 1px solid #000; border-radius: 4px; padding: 7px 9px;
+}
+.ldrive.dark { background: linear-gradient(180deg, #8f8676, #776f61); }
+.ldrive .unitno {
+  background: #1d1b18; color: #fff; font: 700 17px/1 var(--f-panel); letter-spacing: .06em;
+  min-width: 52px; text-align: center; padding: 6px 4px 5px; border-radius: 2px;
+}
+.ldrive .media { min-width: 0; display: grid; gap: 2px; }
+.ldrive .media b { font: 12.5px var(--f-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ldrive .media small { font: 11px var(--f-mono); color: #5b5447; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ldrive .acts { grid-column: 2 / -1; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.ldrive .key { padding: 5px 9px 4px; font-size: 11px; }
+button.rocker { cursor: pointer; width: auto; min-width: 40px; height: 26px; padding: 0 6px; font-size: 9px; }
+button.rocker:hover { filter: brightness(1.15); }
+button.rocker:disabled { cursor: not-allowed; opacity: .5; }
+.sw.mini .pad { width: 15px; height: 28px; }
+.live-others { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-top: 6px; padding: 10px 2px 2px; border-top: 1px solid var(--rule); }
+.live-others .txt small { font-family: var(--f-mono); }
+
 /* printout (LA36 green-bar paper) */
 .printout {
   background:
@@ -600,6 +628,7 @@ input[type="checkbox"] { width: auto; }
   .crt-text, .crt-input input, .crt-input .prompt { font-size: 16px; }
   .drive { grid-template-columns: 1fr; }
   .drive .plate { flex-direction: row; }
+  .ldrive .acts { grid-column: 1 / -1; }
   .logo span { width: 24px; height: 31px; font-size: 22px; }
   .brand-title { font-size: 18px; letter-spacing: .22em; }
 }

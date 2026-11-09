@@ -5,6 +5,9 @@ emulations on a QBone or UniBone, without hand-editing scripts.
 
 * **Web panel** on port **1170** (as in PDP-11/70): choose controllers and drives,
   press START, and watch the `demo` console on a VT220-style screen.
+* **Live devices**: switch controllers, drives, serial lines and the line
+  clock on and off while the emulation runs; spin RL drives up and down, set
+  write protect, change or unload disk images.
 * **`qbmenu`**: the same functions as a text menu for ssh or the serial
   console. After `install.sh` it comes up by itself when you log in.
 * **Autostart**: the emulation that starts at boot, either a fixed choice or
@@ -66,6 +69,31 @@ qbmenu ──HTTP───┘
   drivers are switched off properly. It falls back to SIGTERM and then SIGKILL.
   **KILL** goes straight to the signals.
 
+### Switching devices while the emulation runs
+
+The DEVICES rack under the console (and `qbmenu` → 7) switches devices of the
+running `demo`. Each button types the same commands you would type at the
+`D>>>` prompt:
+
+| Button | Commands |
+|---|---|
+| controller on / off | `en rl` / `dis rl` (RX: also `rxbox` and its power switch) |
+| drive on / off | `en rl1` (RL: plus `p powerswitch 1`) / `dis rl1` |
+| RUN / LOAD (RL) | `sd rl0`, `p runstopbutton 1` / `0` |
+| WP (RL) | `sd rl0`, `p writeprotectbutton 1` / `0` |
+| CHANGE / UNLOAD | `sd rl0`, `p image <file>` / `p image` |
+
+The panel then selects your previous `sd` device again, so e.g. `p c 1` on
+the emulated CPU keeps working. Changes last until `demo` stops; they are
+not saved into the configuration.
+
+`demo` cannot report its device state, so the daemon follows the commands:
+first the command file, then every line typed on the console. The buttons
+only work while `demo` waits at `D>>>` or `DC>>>`. In any other menu they are
+refused with a hint. After leaving the device menu with `q`, `demo` deletes all
+devices; typing `d` creates them again, all switched off, and the panel starts
+over too.
+
 ### Things the panel takes care of
 
 * **QBone address width.** On QBUS, `demo` stops with `FATAL` unless it gets
@@ -84,7 +112,8 @@ qbmenu ──HTTP───┘
 | `qbcontrold` | daemon: web panel and JSON API, owns the `demo` process, runs autostart |
 | `qbmenu` | terminal menu, a client of the daemon; starts the daemon if needed |
 | `qbcontrol/core.py` | paths, platform detection, device catalog, `.cmd` generator, stock script scan |
-| `qbcontrol/runner.py` | the `demo` process on a pty, console ring buffer, graceful stop |
+| `qbcontrol/runner.py` | the `demo` process on a pty, console ring buffer, graceful stop, prompt tracking |
+| `qbcontrol/devstate.py` | which devices are on, and the commands behind the device buttons |
 | `qbcontrol/autostart.py` | DIP switch reading (GPIO 36–39) and autostart choice |
 | `qbcontrol/server.py` | HTTP server and API |
 | `qbcontrol/menu.py` | `qbmenu` |
@@ -93,7 +122,10 @@ qbmenu ──HTTP───┘
 | `~/.qbcontrol/` | settings, configurations, generated command files, logs |
 
 `qbmenu` also takes commands: `qbmenu status`, `qbmenu start config:<id>`,
-`qbmenu start stock:rt11.rl02/rt11v5.5fb_dl0.sh`, `qbmenu stop`, `qbmenu console`.
+`qbmenu start stock:rt11.rl02/rt11v5.5fb_dl0.sh`, `qbmenu stop`, `qbmenu console`,
+`qbmenu devices`, and `qbmenu dev <device> <action> [image]` with the actions
+`on`, `off`, `run`, `load`, `wp`, `wpoff`, `image`. For example,
+`qbmenu dev rl1 image /root/disks/games.rl02`, or `qbmenu dev rl1 image` to unload.
 
 ## Developing on a PC
 

@@ -20,7 +20,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
-from . import VERSION, core, autostart
+from . import VERSION, core, autostart, devstate
 from .runner import Runner
 
 _log_lock = threading.Lock()
@@ -276,6 +276,22 @@ class Handler(BaseHTTPRequestHandler):
                 RUNNER.send(b.get("text", ""))
                 return self._json({"ok": True})
 
+        # -- live device panel: switch devices of the running demo
+        if head == "devices":
+            platform = core.detect_platform(core.load_settings())
+            if len(parts) == 1 and method == "GET":
+                return self._json(device_status(platform))
+            if len(parts) == 1 and method == "POST":
+                b = self._body()
+                with RUNNER.lock:
+                    model = RUNNER.device_info()["model"]
+                    cmds = devstate.action_commands(model, platform, b.get("device"),
+                                                    b.get("action"), b.get("value"))
+                    sent = RUNNER.device_commands(cmds)
+                st = device_status(platform)
+                st["sent"] = sent
+                return self._json(st)
+
         # -- autostart
         if head == "autostart":
             if len(parts) == 1 and method == "GET":
@@ -360,6 +376,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"log": "".join(lines)})
 
         raise ApiError(404, "No such API: %s %s" % (method, "/".join(parts)))
+
+
+def device_status(platform):
+    with RUNNER.lock:
+        info = RUNNER.device_info()
+        out = devstate.device_list(info["model"], platform)
+        out.update({"running": info["running"], "ready": info["ready"], "menu": info["menu"],
+                    "label": (RUNNER.spec or {}).get("label") if info["running"] else None,
+                    "session": RUNNER.session})
+    if not info["running"]:
+        out["reason"] = "No emulation is running."
+    elif not info["ready"]:
+        out["reason"] = devstate.menu_hint(info["menu"])
+    return out
 
 
 def create_config(b):

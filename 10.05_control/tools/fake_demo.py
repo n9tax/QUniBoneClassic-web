@@ -110,6 +110,8 @@ def device_menu(code):
                 print("  %-20s %s" % (f[1], f[2]))
                 if f[1] in ("image", "img") and not (os.path.exists(f[2]) or os.path.exists(f[2] + ".gz")):
                     print("Error: image file \"%s\" not found" % f[2])
+            elif len(f) == 2 and f[1] in ("image", "img"):
+                print("  image                 (none)  [unloaded]")
             elif len(f) == 1:
                 print("Parameters of device %s: (fake)" % cur)
         elif op == "ld":

@@ -7,6 +7,7 @@
 # Only one emulation can drive the bus, so there is exactly one runner.
 
 import errno
+import re
 import fcntl
 import os
 import signal
@@ -16,8 +17,13 @@ import threading
 import time
 
 from . import core
+from . import devstate
 
 BUFFER_MAX = 512 * 1024
+
+# demo prints "\n<menu code>>>>" when it waits for input (menus.cpp getchoice):
+# ">>>" main menu, "D>>>" / "DC>>>" device menu, "TG>>>" GPIO test, ...
+PROMPT_RE = re.compile(br"\n([A-Z]{0,3})>>>")
 
 
 def _make_ctty():
@@ -45,11 +51,26 @@ class Runner(object):
         self.base = 0                 # absolute offset of buf[0]
         self.session = 0              # increments on each start
         self.session_log = None
+        self.model = devstate.DeviceModel()   # devices as set by the commands so far
+        self.menu = None              # last demo prompt seen ("D", "DC", "" = main)
+        self.expected_menu = None     # menu the command file ends in
+        self._tail = b""
+        self._inbuf = ""              # console input of the current line
 
     # ---- console buffer -------------------------------------------------
 
-    def _append(self, data):
+    def _append(self, data, from_demo=False):
         with self.cond:
+            if from_demo:
+                chunk = self._tail + data
+                for m in PROMPT_RE.finditer(chunk):
+                    menu = m.group(1).decode("ascii")
+                    if (self.menu is not None and self.menu not in devstate.DEVICE_MENUS
+                            and menu in devstate.DEVICE_MENUS):
+                        # back in the device menu: demo created all devices anew, all off
+                        self.model = devstate.DeviceModel()
+                    self.menu = menu
+                self._tail = chunk[-8:]
             self.buf.extend(data)
             if len(self.buf) > BUFFER_MAX:
                 cut = len(self.buf) - BUFFER_MAX
@@ -146,6 +167,11 @@ class Runner(object):
             self.state = "running"
             self.session += 1
             self.started_at = time.time()
+            self.model = devstate.DeviceModel.from_cmdfile(spec["cmdfile"])
+            self.expected_menu = self.model.menu
+            self.menu = None
+            self._tail = b""
+            self._inbuf = ""
             self.stopped_at = None
             self.exit_code = None
             try:
@@ -171,7 +197,7 @@ class Runner(object):
                 data = b""       # EIO: slave side closed, process gone
             if not data:
                 break
-            self._append(data)
+            self._append(data, from_demo=True)
         code = proc.wait()
         try:
             os.close(master)
@@ -196,10 +222,59 @@ class Runner(object):
             if self.state == "stopped" or self.master is None:
                 raise core.QbcError("Nothing running")
             fd = self.master
+            self._follow_input(text if not isinstance(text, bytes)
+                               else text.decode("utf-8", "replace"))
         data = text.encode("utf-8") if not isinstance(text, bytes) else text
         while data:
             n = os.write(fd, data)
             data = data[n:]
+
+    # ---- device model ---------------------------------------------------
+
+    def device_menu_active(self):
+        """True if console input now goes to the demo device menu. Before the
+        first prompt, typed lines wait until the command file is done, and are
+        then read by the menu the command file ended in."""
+        menu = self.menu if self.menu is not None else self.expected_menu
+        return menu in devstate.DEVICE_MENUS
+
+    def _follow_input(self, text):
+        # Mirror the pty line discipline (canonical mode): backspace, Ctrl-U.
+        for ch in text:
+            if ch in "\r\n":
+                line, self._inbuf = self._inbuf, ""
+                if line.strip() and self.device_menu_active():
+                    self.model.device_command(line)
+            elif ch in "\x7f\x08":
+                self._inbuf = self._inbuf[:-1]
+            elif ch == "\x15":
+                self._inbuf = ""
+            elif ch >= " ":
+                self._inbuf += ch
+
+    def device_info(self):
+        with self.lock:
+            return {
+                "running": self.state == "running",
+                "menu": self.menu,
+                "ready": self.state == "running" and self.menu in devstate.DEVICE_MENUS,
+                "model": self.model,
+            }
+
+    def device_commands(self, cmds):
+        """Send device menu commands for the device panel. They are refused
+        unless demo is waiting at its device menu prompt."""
+        with self.lock:
+            if self.state != "running":
+                raise core.QbcError("No emulation is running")
+            if self.menu not in devstate.DEVICE_MENUS:
+                raise core.QbcError(devstate.menu_hint(self.menu))
+            cmds = devstate.restore_current(self.model, cmds)
+            # Ctrl-U first: drop a half typed console line, as the tty would.
+            text = ("\x15" if self._inbuf else "") + "\n".join(cmds) + "\n"
+            self.send(text)
+        self.log("device panel: " + "; ".join(cmds))
+        return cmds
 
     def stop(self, force=False, wait=False):
         """Leave the demo menus with "q" (bus drivers and PRU are shut down
