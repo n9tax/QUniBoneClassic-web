@@ -39,6 +39,9 @@ sources changed, and restarts the control panel when that changed. Disk images,
 the stock scripts and your panel configurations are left alone. `-n` only shows
 what would change, `-y` skips the question, and `-a` recompiles everything.
 
+Once the control panel is installed, the same is on its SYSTEM page: CHECK
+lists what would change, UPDATE does it and shows the output.
+
 The first time, also install the control panel:
 
 ```sh

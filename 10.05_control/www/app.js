@@ -1079,11 +1079,68 @@ async function loadSystem() {
   ];
   $("#sys-facts").replaceChildren(...facts.flatMap(([k, v, cls]) => [el("dt", { text: k }), el("dd", { class: cls || "", text: v })]));
   loadLog();
+  loadUpdate();
 }
 async function loadLog() {
   try { const r = await GET("log"); $("#sys-log").textContent = r.log || "(empty)"; const p = $("#sys-log").parentElement; p.scrollTop = p.scrollHeight; } catch (e) { fail(e); }
 }
 $("#sys-log-refresh").addEventListener("click", loadLog);
+
+// update: runs ~/qbweb-update.sh on the BeagleBone, outside the daemon. At the
+// end it restarts the daemon, so polling keeps going through a lost link.
+let UPD = null, updTimer = null, updLost = 0;
+
+async function loadUpdate() {
+  try { UPD = await GET("update"); updLost = 0; }
+  catch (e) { updLost++; }
+  renderUpdate();
+  clearTimeout(updTimer);
+  if ((UPD && UPD.running) || (updLost > 0 && updLost < 90)) updTimer = setTimeout(loadUpdate, 2000);
+}
+
+function renderUpdate() {
+  if (!UPD) return;
+  const src = UPD.repo ? UPD.repo + ", branch " + UPD.branch : "GitHub";
+  $("#upd-what").textContent = UPD.available
+    ? "Gets the newest version from " + src + " with " + UPD.script + ": copies the changed files " +
+      "(previous versions go to ~/.qbweb-backup), recompiles demo when its sources changed (that takes " +
+      "a while on the BeagleBone), and restarts the control panel. CHECK only lists what would change."
+    : UPD.script + " is missing. Install it once in a shell on the BeagleBone, as described in the README.";
+  const busy = UPD.running;
+  const emu = isRunning();
+  $("#upd-check").disabled = busy || !UPD.available;
+  $("#upd-run").disabled = busy || !UPD.available || emu;
+  $("#upd-run").title = emu ? "Stop the emulation first" : "Download, copy the changed files, recompile demo if needed, restart the panel";
+  let state = "";
+  if (updLost) state = "CONTROL PANEL RESTARTING …";
+  else if (busy) state = (UPD.mode === "check" ? "CHECKING" : "UPDATING") + " …";
+  else if (UPD.finished) state = (UPD.mode === "check" ? "CHECK " : "UPDATE ") + (UPD.exit_code === 0 ? "DONE" : "FAILED");
+  $("#upd-state").textContent = state;
+  $("#upd-reload").hidden = !(UPD.finished && UPD.mode === "update" && UPD.exit_code === 0 &&
+    UPD.started * 1000 > PAGE_LOADED);
+  const out = $("#upd-out");
+  $("#upd-out-wrap").hidden = !UPD.log;
+  if (out.textContent !== UPD.log) {
+    out.textContent = UPD.log;
+    const p = out.parentElement; p.scrollTop = p.scrollHeight;
+  }
+}
+
+async function startUpdate(mode) {
+  if (mode === "update" && !await confirmBox("UPDATE",
+      "Update the QUniBone software from " + (UPD && UPD.repo ? UPD.repo : "GitHub") + "? Changed files are copied in, " +
+      "demo is recompiled if needed, and the control panel restarts at the end.", "UPDATE")) return;
+  try {
+    UPD = await POST("update", { mode });
+    renderUpdate();
+    clearTimeout(updTimer);
+    updTimer = setTimeout(loadUpdate, 1000);
+  } catch (e) { fail(e); }
+}
+const PAGE_LOADED = Date.now();
+$("#upd-check").addEventListener("click", () => startUpdate("check"));
+$("#upd-run").addEventListener("click", () => startUpdate("update"));
+$("#upd-reload").addEventListener("click", () => location.reload());
 $("#set-save").addEventListener("click", async () => {
   const body = {
     platform: $("#set-platform").value,

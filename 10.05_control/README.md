@@ -13,6 +13,9 @@ emulations on a QBone or UniBone, without hand-editing scripts.
   (QBone), INIT and RESTART (power cycle).
 * **`qbmenu`**: the same functions as a text menu for ssh or the serial
   console. After `install.sh` it comes up by itself when you log in.
+* **Update**: SYSTEM → UPDATE runs `~/qbweb-update.sh` from the browser. CHECK
+  lists what would change. UPDATE copies the new files, recompiles `demo` when
+  needed and restarts the panel. Its output shows on the page.
 * **Autostart**: the emulation that starts at boot, either a fixed choice or
   selected by the four DIP switches on the board, as `autostart.sh.example` did.
 
@@ -102,6 +105,16 @@ only work while `demo` waits at `D>>>` or `DC>>>`. In any other menu they are
 refused with a hint. After leaving the device menu with `q`, `demo` deletes all
 devices; typing `d` creates them again, all switched off, and the panel starts
 over too.
+
+### Updating from the web page
+
+SYSTEM → UPDATE runs `qbweb-update.sh` (in the QUniBone home directory, see
+the main README) with `-n` for CHECK or `-y` for UPDATE. It runs as its own systemd unit
+(`systemd-run`), outside the `qbcontrol` service, so it keeps going when it
+restarts the panel at the end. Its output and exit code are kept in
+`~/.qbcontrol/update/`, and the restarted panel shows them. UPDATE is
+refused while an emulation runs, and START is refused while an update runs.
+When it is done, RELOAD PAGE loads the new version of the page.
 
 ### Things the panel takes care of
 

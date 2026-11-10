@@ -206,6 +206,16 @@
       <div class="unit-head sub"><h2>DAEMON LOG</h2><button class="key small-key" id="sys-log-refresh">REFRESH</button></div>
       <div class="printout"><pre id="sys-log"></pre></div>
     </section>
+    <section class="unit wide" id="upd-unit">
+      <div class="unit-head"><h2>UPDATE</h2><span class="silk-dim" id="upd-state"></span></div>
+      <p class="hint" id="upd-what"></p>
+      <div class="btn-row">
+        <button class="key" id="upd-check" title="Download and list what would change, without changing anything">CHECK</button>
+        <button class="key key-start" id="upd-run" title="Download, copy the changed files, recompile demo if needed, restart the panel">UPDATE</button>
+        <button class="key" id="upd-reload" hidden title="Load the new version of this page">RELOAD PAGE</button>
+      </div>
+      <div class="printout" id="upd-out-wrap" hidden><pre id="upd-out"></pre></div>
+    </section>
   </main>
 
   <footer class="panel-foot">

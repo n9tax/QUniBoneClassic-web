@@ -20,7 +20,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
-from . import VERSION, core, autostart, devstate
+from . import VERSION, core, autostart, devstate, updater
 from .runner import Runner
 
 _log_lock = threading.Lock()
@@ -83,6 +83,7 @@ def system_status():
                       "target_label": core.describe_target(a.get("target"), settings)
                       if a.get("target") else ""},
         "runner": RUNNER.status(),
+        "updating": updater.running(),
     }
     return st
 
@@ -257,6 +258,7 @@ class Handler(BaseHTTPRequestHandler):
         if head == "start" and method == "POST":
             b = self._body()
             target = b.get("target", "")
+            no_update_running()
             spec = core.launch_spec(target, core.load_settings(), leds=b.get("leds"))
             return self._json(RUNNER.start(spec))
         if head == "stop" and method == "POST":
@@ -367,6 +369,19 @@ class Handler(BaseHTTPRequestHandler):
                     core.save_settings(s)
                 return self._json({"ok": True})
 
+        # -- update the QUniBone software with qbweb-update.sh
+        if head == "update":
+            if len(parts) == 1 and method == "GET":
+                return self._json(updater.status())
+            if len(parts) == 1 and method == "POST":
+                mode = self._body().get("mode", "")
+                if mode == "update" and RUNNER.state != "stopped":
+                    raise core.QbcError("Stop the emulation first: the update rebuilds demo "
+                                        "and restarts the control panel.")
+                st = updater.start(mode)
+                log("update: started %s (%s)" % (updater.SCRIPT_NAME, mode))
+                return self._json(st)
+
         if head == "log" and method == "GET":
             try:
                 with open(core.LOG_FILE) as f:
@@ -390,6 +405,11 @@ def device_status(platform):
     elif not info["ready"]:
         out["reason"] = devstate.menu_hint(info["menu"])
     return out
+
+
+def no_update_running():
+    if updater.running():
+        raise core.QbcError("An update is running. Start the emulation when it is done.")
 
 
 def create_config(b):
@@ -433,6 +453,9 @@ def run_autostart(delay=True):
         if RUNNER.running():
             return {"started": False, "reason": "an emulation was started meanwhile"}
     log("autostart: %s -> %s" % (reason, target))
+    if updater.running():
+        log("autostart: skipped, an update is running")
+        return {"started": False, "reason": "an update is running"}
     spec = core.launch_spec(target, s, leds=leds)
     RUNNER.start(spec)
     return {"started": True, "target": target, "reason": reason}

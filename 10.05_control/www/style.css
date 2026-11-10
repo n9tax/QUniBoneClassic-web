@@ -178,6 +178,7 @@ code { font-family: var(--f-mono); font-size: .88em; color: var(--lamp-amber); }
 .view { display: grid; gap: 16px; grid-template-columns: minmax(280px, 360px) 1fr; align-items: start; }
 #view-library, #view-system { grid-template-columns: 1fr; }
 #view-system { grid-template-columns: 1fr 1fr; }
+#upd-unit { grid-column: 1 / -1; }
 #view-autostart { grid-template-columns: minmax(300px, 1fr) minmax(300px, 1.1fr); }
 
 .unit {
