@@ -374,6 +374,27 @@ function liveRack(c) {
   return el("div", { class: "rack on" }, head, body);
 }
 
+// PDP-11 front panel: HALT/ENABLE switch (QBUS), INIT, RESTART (power cycle)
+function livePanel(bus) {
+  if (!bus) return [];
+  const out = [];
+  if (bus.can_halt) {
+    out.push(liveSwitch(bus.halt, "HALT", bus.halt ? "HALT asserted: the CPU stays in ODT" : "ENABLE",
+      (v) => devAction("bus", v ? "halt" : "enable"),
+      { title: bus.halt ? "Release the HALT line (h 0). Type P or an address followed by G on the PDP-11 console to continue"
+                        : "Assert the HALT line (h 1), like the front panel HALT switch", aria: "HALT switch" }));
+  }
+  out.push(el("button", { class: "key", title: "Pulse bus INIT: resets all devices, the CPU keeps running",
+    onclick: () => devAction("bus", "init") }, "INIT"));
+  out.push(el("button", { class: "key", title: "Power cycle the bus (" + bus.restart + "), like the front panel RESTART",
+    onclick: async () => {
+      if (await confirmBox("RESTART", "Power cycle the PDP-11 bus (" + bus.restart + ")? The CPU restarts as after " +
+          "switching it on: in ODT, or booting, as set by its power-up jumpers. A running operating system is lost.", "RESTART"))
+        devAction("bus", "restart");
+    } }, "RESTART"));
+  return out;
+}
+
 function renderDevices() {
   if (!DEV) return;
   const unit = $("#live-unit");
@@ -383,9 +404,10 @@ function renderDevices() {
   rs.textContent = DEV.reason || "";
   rs.hidden = !DEV.reason;
   // keep scroll / focus stable: only rebuild when something changed
-  const sig = JSON.stringify([DEV.ready, DEV.controllers, DEV.others]);
+  const sig = JSON.stringify([DEV.ready, DEV.controllers, DEV.others, DEV.bus]);
   if (unit._sig === sig) return;
   unit._sig = sig;
+  $("#live-panel").replaceChildren(...livePanel(DEV.bus));
   $("#live-racks").replaceChildren(...DEV.controllers.map(liveRack));
   $("#live-others").replaceChildren(...DEV.others.map((o) =>
     liveSwitch(o.on, o.label, o.info || (o.on ? "on" : "off"), (v) => devAction(o.key, v ? "on" : "off"), { violet: true })));

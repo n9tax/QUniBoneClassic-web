@@ -59,11 +59,12 @@ class DeviceModel(object):
         self.enabled = {}       # device name -> bool
         self.params = {}        # device name -> {param: value}
         self.current = None     # device selected with "sd"
+        self.halt = False       # QBUS HALT line, set with "h 1" / "h 0"
         self.menu = "main"      # only used when parsing a command file
 
     def to_dict(self):
         return {"enabled": dict(self.enabled), "params": dict((k, dict(v)) for k, v in self.params.items()),
-                "current": self.current}
+                "current": self.current, "halt": self.halt}
 
     # ---- commands -------------------------------------------------------
 
@@ -86,6 +87,13 @@ class DeviceModel(object):
             return True
         if op == "sd" and len(f) == 2:
             self.current = _norm(f[1])
+            return True
+        if op == "h" and len(f) == 2:
+            # demo parses the value as an octal word: anything but 0 asserts HALT
+            try:
+                self.halt = int(f[1], 8) != 0
+            except ValueError:
+                return False
             return True
         if op == "p" and self.current and len(f) in (2, 3):
             name = _norm(f[1])
@@ -196,7 +204,27 @@ def device_list(model, platform):
         p = model.params.get(n["key"], {})
         others.append({"key": n["key"], "label": n["label"] + " Ethernet", "on": model.is_on(n["key"]),
                        "info": " ".join(x for x in (p.get("interface", ""), p.get("mac", "")) if x)})
-    return {"controllers": ctrls, "others": others, "current": model.current}
+    bus = {"halt": model.halt, "can_halt": platform == "QBUS",
+           "restart": "DCOK/POK" if platform == "QBUS" else "ACLO/DCLO"}
+    return {"controllers": ctrls, "others": others, "current": model.current, "bus": bus}
+
+
+# Front panel of the PDP-11: HALT switch, INIT, power cycle (RESTART).
+BUS_ACTIONS = ("halt", "enable", "init", "restart")
+
+
+def bus_commands(platform, action):
+    """Device menu command for a front panel button."""
+    action = _norm(action or "")
+    if action in ("halt", "enable"):
+        if platform != "QBUS":
+            raise core.QbcError("demo can drive the HALT line only on QBUS")
+        return ["h 1" if action == "halt" else "h 0"]
+    if action == "init":
+        return ["init"]
+    if action == "restart":
+        return ["pwr"]
+    raise core.QbcError("Unknown front panel action \"%s\"" % action)
 
 
 SIMPLE_DEVICES = ("dl11", "dl11b", "kw11", "delqa")
@@ -219,6 +247,8 @@ def action_commands(model, platform, device, action, value=None):
     """Device menu command lines for one button press."""
     dev = _norm(device or "")
     action = _norm(action or "")
+    if dev == "bus":
+        return bus_commands(platform, action)
     if not re.match(r"^[a-z0-9]{1,12}$", dev):
         raise core.QbcError("Bad device name")
 

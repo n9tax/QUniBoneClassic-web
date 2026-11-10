@@ -67,8 +67,11 @@ class Runner(object):
                     menu = m.group(1).decode("ascii")
                     if (self.menu is not None and self.menu not in devstate.DEVICE_MENUS
                             and menu in devstate.DEVICE_MENUS):
-                        # back in the device menu: demo created all devices anew, all off
+                        # back in the device menu: demo created all devices anew, all off.
+                        # The HALT line is not a device and stays as it was.
+                        halt = self.model.halt
                         self.model = devstate.DeviceModel()
+                        self.model.halt = halt
                     self.menu = menu
                 self._tail = chunk[-8:]
             self.buf.extend(data)

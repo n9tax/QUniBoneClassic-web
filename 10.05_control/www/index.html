@@ -99,10 +99,12 @@
     <section class="unit live-unit" id="live-unit">
       <div class="unit-head"><h2>DEVICES</h2><span class="silk-dim" id="live-state"></span></div>
       <p class="hint" id="live-reason" hidden></p>
+      <div class="live-panel" id="live-panel" aria-label="PDP-11 front panel"></div>
       <div class="live-racks" id="live-racks"></div>
       <div class="live-others" id="live-others"></div>
       <p class="hint">Switches act on the running emulation, like typing <code>en</code>, <code>dis</code> and
-        <code>p …</code> at the <code>D&gt;&gt;&gt;</code> prompt. They do not change the saved configuration;
+        <code>p …</code> at the <code>D&gt;&gt;&gt;</code> prompt (HALT, INIT and RESTART send <code>h 1</code>/<code>h 0</code>,
+        <code>init</code> and <code>pwr</code>). They do not change the saved configuration;
         what demo does with them shows in the console.</p>
     </section>
   </main>

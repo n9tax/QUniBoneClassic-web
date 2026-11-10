@@ -9,7 +9,8 @@ emulations on a QBone or UniBone, without hand-editing scripts.
   puts the PDP-11 on your LAN, see [DELQA.md](../10.02_devices/DELQA.md).
 * **Live devices**: switch controllers, drives, serial lines, the line
   clock and the DELQA on and off while the emulation runs; spin RL drives up and down, set
-  write protect, change or unload disk images.
+  write protect, change or unload disk images. Front panel controls: HALT/ENABLE
+  (QBone), INIT and RESTART (power cycle).
 * **`qbmenu`**: the same functions as a text menu for ssh or the serial
   console. After `install.sh` it comes up by itself when you log in.
 * **Autostart**: the emulation that starts at boot, either a fixed choice or
@@ -87,6 +88,9 @@ running `demo`. Each button types the same commands you would type at the
 | RUN / LOAD (RL) | `sd rl0`, `p runstopbutton 1` / `0` |
 | WP (RL) | `sd rl0`, `p writeprotectbutton 1` / `0` |
 | CHANGE / UNLOAD | `sd rl0`, `p image <file>` / `p image` |
+| HALT switch (QBUS) | `h 1` / `h 0`: asserts or releases the HALT line. The CPU enters ODT and stays there while HALT is asserted; after releasing it, type `P` or `<addr>G` on the PDP-11 console |
+| INIT | `init`: pulses bus INIT, which resets the devices |
+| RESTART | `pwr`: power cycles the bus (QBUS DCOK/POK, UNIBUS ACLO/DCLO); the CPU powers up as its jumpers say (ODT, or boot) |
 
 The panel then selects your previous `sd` device again, so e.g. `p c 1` on
 the emulated CPU keeps working. Changes last until `demo` stops; they are
@@ -131,6 +135,7 @@ over too.
 `qbmenu devices`, and `qbmenu dev <device> <action> [image]` with the actions
 `on`, `off`, `run`, `load`, `wp`, `wpoff`, `image`. For example,
 `qbmenu dev rl1 image /root/disks/games.rl02`, or `qbmenu dev rl1 image` to unload.
+The front panel is the device `bus`: `qbmenu dev bus halt`, `enable`, `init`, `restart`.
 
 ## Developing on a PC
 

@@ -91,6 +91,8 @@ def device_menu(code):
             print("Power cycle: ACLO/DCLO" if BUS == "UNIBUS" else "Power cycle: DCOK/POK")
         elif op == "init":
             print("INIT pulsed.")
+        elif op == "h" and len(f) == 2 and BUS == "QBUS":
+            print("HALT %s." % ("asserted" if f[1] != "0" else "released"))
         elif op == "m" and len(f) > 1 and f[1] == "i":
             top = {16: "157776", 18: "757776", 22: "17757776"}.get(aw, "757776")
             print("Now emulating QBone memory in range 00000000..%s with DDR memory." % top)

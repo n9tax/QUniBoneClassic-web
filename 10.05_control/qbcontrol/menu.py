@@ -504,6 +504,14 @@ def do_devices(c):
                 print("   %2d    %-10s %s  %-7s  %s" % (n, drv["name"], onoff(drv["on"]), flags, media if drv["on"] else ""))
             else:
                 print("   %2d  %-20s %s  %s" % (n, x["label"], onoff(x["on"]), dim(x.get("info", ""))))
+        bus = d.get("bus") or {}
+        if bus:
+            print()
+            if bus.get("can_halt"):
+                print("   PDP-11  HALT %s   " % (rev(" HALT ") if bus.get("halt") else "ENABLE") +
+                      dim("H  HALT/ENABLE   INIT  pulse INIT   RESTART  power cycle"))
+            else:
+                print("   PDP-11  " + dim("INIT  pulse INIT   RESTART  power cycle"))
         print()
         print("   <n> or <name>  switch on/off   (any drive by name, e.g. rk3)")
         print("   R <n>  RUN/LOAD (RL)   W <n>  write protect (RL)")
@@ -515,6 +523,18 @@ def do_devices(c):
         k = ask("  > ").strip()
         if not k:
             return
+        low = k.lower()
+        if low in ("h", "init", "restart"):
+            try:
+                if low == "h":
+                    c.post("/api/devices", {"device": "bus", "action": "enable" if bus.get("halt") else "halt"})
+                elif low == "init":
+                    c.post("/api/devices", {"device": "bus", "action": "init"})
+                elif ask("  Power cycle the PDP-11? A running operating system is lost. [y/N] ").lower() == "y":
+                    c.post("/api/devices", {"device": "bus", "action": "restart"})
+            except core.QbcError as e:
+                msg = rev(" ERROR ") + " " + str(e)
+            continue
         f = k.split()
         verb = f[0].lower() if len(f) == 2 and f[0].lower() in ("r", "w", "i", "u") else ""
         ref = f[1] if verb else k
@@ -626,6 +646,7 @@ def main(argv=None):
         print("  target: config:<id> or stock:<path below 5_applications>")
         print("  dev:    qbmenu dev rk on | dev rl0 run | dev rl0 load | dev rl0 wp | dev rl0 wpoff")
         print("          qbmenu dev rl1 image /root/disks/x.rl02 | dev rl1 image   (unload)")
+        print("          qbmenu dev bus halt | dev bus enable | dev bus init | dev bus restart")
         return 0
     if not ensure_daemon(c):
         return 1
@@ -654,6 +675,8 @@ def main(argv=None):
                     print("  %-6s %-3s %s" % (name, "on" if drv["on"] else "off", drv["image"]))
                 else:
                     print("%-8s %-3s %s" % (name, "on" if x["on"] else "off", x.get("label", "")))
+            if (d.get("bus") or {}).get("can_halt"):
+                print("%-8s %s" % ("halt", "asserted" if d["bus"]["halt"] else "released"))
         elif cmd == "dev" and len(argv) >= 3:
             r = c.post("/api/devices", {"device": argv[1], "action": argv[2],
                                         "value": argv[3] if len(argv) > 3 else ""})
