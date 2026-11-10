@@ -197,15 +197,27 @@ static void respond(struct hreq *r)
 static void accept_(tcb_t *t)
 {
 	int i;
+	struct hreq *v = NULL;
 	for (i = 0; i < NHTTP; i++)
 		if (!reqs[i].t) {
-			memset(&reqs[i], 0, sizeof reqs[i]);
-			reqs[i].t = t;
-			t->appstate = &reqs[i];
+			v = &reqs[i];
+			break;
+		}
+	if (!v) {
+		/* all taken: drop the one idle longest that never sent a request */
+		for (i = 0; i < NHTTP; i++)
+			if (!reqs[i].got_line && !reqs[i].sending && (!v || reqs[i].t->idle > v->t->idle))
+				v = &reqs[i];
+		if (!v) {
+			t->appstate = NULL;
+			tcp_abort(t);
 			return;
 		}
-	t->appstate = NULL;
-	tcp_abort(t);
+		tcp_abort(v->t);        /* calls closed_(), which frees the slot */
+	}
+	memset(v, 0, sizeof *v);
+	v->t = t;
+	t->appstate = v;
 }
 
 static void recv_(tcb_t *t, u8 *d, u16 len)
@@ -256,7 +268,8 @@ static void closed_(tcb_t *t)
 	t->appstate = NULL;
 }
 
-static const tcp_app_t http_app = { 80, accept_, recv_, sent_, closed_ };
+/* browsers open connections they may never use: do not let them sit */
+static const tcp_app_t http_app = { 80, accept_, recv_, sent_, closed_, 20 };
 
 void http_init(void)
 {

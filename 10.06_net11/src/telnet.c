@@ -100,7 +100,7 @@ static void closed_(tcb_t *t)
 	t->appstate = NULL;
 }
 
-static const tcp_app_t telnet_app = { 23, accept_, recv_, NULL, closed_ };
+static const tcp_app_t telnet_app = { 23, accept_, recv_, NULL, closed_, 1800 };
 
 void telnet_init(void)
 {

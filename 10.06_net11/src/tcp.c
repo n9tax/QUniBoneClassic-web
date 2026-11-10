@@ -263,8 +263,21 @@ void tcp_input(const u8 *src, u8 *seg, u16 len)
 				send_reset(src, sport, dport, 0, seq + 1 + dlen, 1);
 				return;
 			}
-			if (!t)
-				return;         /* all busy: the peer will retry */
+			if (!t) {
+				/* all busy: take the connection to this port that has been
+				   idle longest without ever sending anything (browsers open
+				   spare connections), else let the peer retry */
+				tcb_t *v = NULL;
+				for (i = 0; i < TCP_MAXCONN; i++)
+					if (tcbs[i].state == TCP_ESTABLISHED && tcbs[i].lport == dport
+					    && !tcbs[i].got_data && (!v || tcbs[i].idle > v->idle))
+						v = &tcbs[i];
+				if (!v)
+					return;
+				DBG(v, "unused, reset for a new connection");
+				tcp_abort(v);
+				t = v;
+			}
 			memset(t, 0, sizeof(tcb_t) - TCP_TXBUF);
 			t->state = TCP_SYN_RCVD;
 			memcpy(t->rip, src, 4);
@@ -352,6 +365,7 @@ void tcp_input(const u8 *src, u8 *seg, u16 len)
 	t->snd_wnd = wnd;
 
 	if (dlen) {
+		t->got_data = 1;
 		if (seq == t->rcv_nxt && (t->state == TCP_ESTABLISHED || t->state == TCP_FIN_WAIT1
 					  || t->state == TCP_FIN_WAIT2)) {
 			t->rcv_nxt += dlen;
@@ -440,8 +454,10 @@ void tcp_timer(void)
 		t->idle++;
 		if (t->state == TCP_FIN_WAIT2 && t->idle > 60)
 			set_closed(t);
-		else if (t->idle > 1800)        /* 30 minutes without traffic */
+		else if (t->idle > (t->app && t->app->idle_limit ? t->app->idle_limit : 1800)) {
+			DBG(t, "idle, reset");
 			tcp_abort(t);
+		}
 	}
 }
 

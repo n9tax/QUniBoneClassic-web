@@ -62,6 +62,7 @@ typedef struct tcp_app {
 	void (*recv)(struct tcb *t, u8 *data, u16 len);
 	void (*sent)(struct tcb *t);        /* buffer space became free */
 	void (*closed)(struct tcb *t);      /* connection gone */
+	u16 idle_limit;                     /* seconds without traffic before reset */
 } tcp_app_t;
 
 typedef struct tcb {
@@ -72,6 +73,7 @@ typedef struct tcb {
 	u16 snd_wnd, mss;
 	u16 txlen;                  /* bytes in tx[], first one is snd_una */
 	u8 fin_pending, ack_now, retries, close_after;
+	u8 got_data;                /* the peer has sent something */
 	u16 rto, rtimer;            /* ticks */
 	u16 idle;                   /* seconds without traffic */
 	const tcp_app_t *app;
