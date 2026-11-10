@@ -1,0 +1,8 @@
+src/*.o
+src/net11.out
+src/net11.map
+src/net11.dis
+src/net11.lda
+emu11/emu11
+toolchain/work/
+toolchain/pdp11-tools/

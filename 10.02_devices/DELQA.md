@@ -42,6 +42,7 @@ en delqa
 | RT-11 | DECnet-RT (Phase IV) |
 | 2.11BSD | `qe` driver. Note that BSD networking needs a CPU with separate instruction and data space and supervisor mode (11/73, 11/83, 11/84, 11/93/94), so not an 11/23. |
 | Unix V6 | No Ethernet support. It would need a new driver and a network stack. |
+| net11 | Stand-alone TCP/IP monitor in this repository ([`10.06_net11`](../10.06_net11/README.md)): DHCP, ping, DNS, NTP, web and telnet server. Runs on an 11/23, needs no operating system. The quickest way to see the DELQA work. |
 
 DECnet Phase IV changes the station address to `AA-00-04-00-xx-yy`
 (computed from the node number) through a setup frame. The emulation handles that:

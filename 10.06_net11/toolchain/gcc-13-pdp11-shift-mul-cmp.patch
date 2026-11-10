@@ -1,0 +1,222 @@
+--- a/gcc/config/pdp11/pdp11.md
++++ b/gcc/config/pdp11/pdp11.md
+@@ -21,6 +21,11 @@
+ (include "predicates.md")
+ (include "constraints.md")
+ 
++(define_c_enum "unspec"
++  [
++    UNSPEC_ASH_RIGHT
++  ])
++
+ (define_c_enum "unspecv"
+   [
+     UNSPECV_BLOCKAGE
+@@ -434,11 +439,15 @@
+ 		      (pc)))]
+   "")
+ 
++;; Only one word compares here.  Multiword compares are left to the generic
++;; expansion (word by word): the two word compare below (cmpsi) leaves the
++;; condition codes of the low word compare when the high words are equal,
++;; and a signed branch on those is wrong (the low word is unsigned).
+ (define_insn_and_split "cbranch<mode>4"
+   [(set (pc)
+ 	(if_then_else (match_operator 0 "ordered_comparison_operator"
+-		       [(match_operand:QHSDint 1 "general_operand" "g")
+-			(match_operand:QHSDint 2 "general_operand" "g")])
++		       [(match_operand:PDPint 1 "general_operand" "g")
++			(match_operand:PDPint 2 "general_operand" "g")])
+ 		      (label_ref (match_operand 3 "" ""))
+ 		      (pc)))]
+   ""
+@@ -1712,6 +1721,62 @@
+   [(set_attr "length" "2,4")
+    (set_attr "base_cost" "8")])
+ 
++;; Right shifts by "ash"/"ashc" with a negative count (operand 2 is the
++;; negated count).  They must not be written as (ashift x (neg n)): a left
++;; shift by a negative amount has no meaning in RTL, and the optimizers then
++;; conclude e.g. that the low bits of the result are zero.
++(define_insn_and_split "ashrhi_ash"
++  [(set (match_operand:HI 0 "register_operand" "=r,r")
++	(unspec:HI [(match_operand:HI 1 "register_operand" "0,0")
++		    (match_operand:HI 2 "general_operand" "rR,Qi")]
++		   UNSPEC_ASH_RIGHT))]
++  "TARGET_40_PLUS"
++  "#"
++  "&& reload_completed"
++  [(parallel [(set (match_dup 0)
++		   (unspec:HI [(match_dup 1) (match_dup 2)] UNSPEC_ASH_RIGHT))
++	      (clobber (reg:CC CC_REGNUM))])]
++  ""
++  [(set_attr "length" "2,4")
++   (set_attr "base_cost" "8")])
++
++(define_insn "*ashrhi_ash_clobber"
++  [(set (match_operand:HI 0 "register_operand" "=r,r")
++	(unspec:HI [(match_operand:HI 1 "register_operand" "0,0")
++		    (match_operand:HI 2 "general_operand" "rR,Qi")]
++		   UNSPEC_ASH_RIGHT))
++   (clobber (reg:CC CC_REGNUM))]
++  "TARGET_40_PLUS && reload_completed"
++  "ash\t%2,%0"
++  [(set_attr "length" "2,4")
++   (set_attr "base_cost" "8")])
++
++(define_insn_and_split "ashrsi_ash"
++  [(set (match_operand:SI 0 "register_operand" "=r,r")
++	(unspec:SI [(match_operand:SI 1 "register_operand" "0,0")
++		    (match_operand:HI 2 "general_operand" "rR,Qi")]
++		   UNSPEC_ASH_RIGHT))]
++  "TARGET_40_PLUS"
++  "#"
++  "&& reload_completed"
++  [(parallel [(set (match_dup 0)
++		   (unspec:SI [(match_dup 1) (match_dup 2)] UNSPEC_ASH_RIGHT))
++	      (clobber (reg:CC CC_REGNUM))])]
++  ""
++  [(set_attr "length" "2,4")
++   (set_attr "base_cost" "8")])
++
++(define_insn "*ashrsi_ash_clobber"
++  [(set (match_operand:SI 0 "register_operand" "=r,r")
++	(unspec:SI [(match_operand:SI 1 "register_operand" "0,0")
++		    (match_operand:HI 2 "general_operand" "rR,Qi")]
++		   UNSPEC_ASH_RIGHT))
++   (clobber (reg:CC CC_REGNUM))]
++  "TARGET_40_PLUS && reload_completed"
++  "ashc\t%2,%0"
++  [(set_attr "length" "2,4")
++   (set_attr "base_cost" "8")])
++
+ ;; Now the expanders that produce the insns defined above. 
+ (define_expand "ashl<mode>3"
+   [(match_operand:QHSint 0 "nonimmediate_operand" "")
+@@ -1752,13 +1817,16 @@
+       operands[2] = negate_rtx (HImode, operands[2]);
+       if (<QHSint:e_mname> == E_QImode)
+         {
+-          r = copy_to_mode_reg (HImode, gen_rtx_ZERO_EXTEND (HImode, operands[1]));
+-          emit_insn (gen_aslhi_op (r, r, operands[2]));
++          /* arithmetic: sign extend the byte */
++          r = copy_to_mode_reg (HImode, gen_rtx_SIGN_EXTEND (HImode, operands[1]));
++          emit_insn (gen_ashrhi_ash (r, r, operands[2]));
+           emit_insn (gen_movqi (operands[0], gen_rtx_SUBREG (QImode, r, 0)));
+         }
+       else
+         {
+-          emit_insn (gen_asl<QHSint:hmode>_op (operands[0], operands[1], operands[2]));
++          r = copy_to_mode_reg (<QHSint:mname>, operands[1]);
++          emit_insn (gen_ashr<QHSint:hmode>_ash (r, r, operands[2]));
++          emit_move_insn (operands[0], r);
+         }
+     }
+   DONE;
+@@ -1771,29 +1839,60 @@
+   ""
+   "
+ {
+-  rtx r, n;
++  rtx r, n, w;
+ 
+   if (!pdp11_expand_shift (operands, gen_lshiftrt<mode>_sc, gen_lshiftrt<mode>_base))
+     {
+       if (<QHSint:e_mname> == E_QImode)
+         {
++          /* logical: zero extend the byte, then an arithmetic right shift
++             of the non-negative word is the same */
+           r = copy_to_mode_reg (HImode, gen_rtx_ZERO_EXTEND (HImode, operands[1]));
+-          emit_insn (gen_aslhi_op (r, r, operands[2]));
++          emit_insn (gen_ashrhi_ash (r, r, negate_rtx (HImode, operands[2])));
+           emit_insn (gen_movqi (operands[0], gen_rtx_SUBREG (QImode, r, 0)));
+         }
++      else if (<QHSint:e_mname> == E_HImode)
++        {
++          /* zero extend to 32 bits and shift the pair with ashc: right for
++             every count, also 0 */
++          w = gen_reg_rtx (SImode);
++          emit_clobber (w);
++          emit_move_insn (gen_highpart (HImode, w), const0_rtx);
++          emit_move_insn (gen_lowpart (HImode, w), operands[1]);
++          emit_insn (gen_ashrsi_ash (w, w, negate_rtx (HImode, operands[2])));
++          emit_move_insn (operands[0], gen_lowpart (HImode, w));
++        }
+       else
+         {
+-          r = gen_reg_rtx (<QHSint:mname>);
+-          emit_insn (gen_lshiftrt<mode>_sc (r, operands[1], const1_rtx));
+           if (GET_CODE (operands[2]) != CONST_INT)
+             {
+-              n = gen_reg_rtx (HImode);
+-              emit_insn (gen_addhi3 (n, operands [2], GEN_INT (-1)));
+-              emit_insn (gen_ashr<mode>3 (operands[0], r, n));
++              /* 32 bits, variable count: arithmetic shift, then clear the
++                 top s bits with ~((-1 << (31 - s)) << 1), which is also
++                 right for s = 0 */
++              rtx c, m;
++              r = copy_to_mode_reg (SImode, operands[1]);
++              emit_insn (gen_ashrsi_ash (r, r, negate_rtx (HImode, operands[2])));
++              c = expand_simple_binop (HImode, MINUS, GEN_INT (31), operands[2],
++                                       NULL_RTX, 0, OPTAB_LIB_WIDEN);
++              m = expand_simple_binop (SImode, ASHIFT, constm1_rtx, c,
++                                       NULL_RTX, 0, OPTAB_LIB_WIDEN);
++              m = expand_simple_binop (SImode, ASHIFT, m, const1_rtx,
++                                       NULL_RTX, 0, OPTAB_LIB_WIDEN);
++              m = expand_simple_unop (SImode, NOT, m, NULL_RTX, 0);
++              r = expand_simple_binop (SImode, AND, r, m, operands[0], 1,
++                                       OPTAB_LIB_WIDEN);
++              if (r != operands[0])
++                emit_move_insn (operands[0], r);
+             }
+           else
+-            emit_insn (gen_asl<QHSint:hmode>_op (operands[0], r,
+-				  GEN_INT (1 - INTVAL (operands[2]))));
++            {
++              /* 32 bits, constant count >= 4: one logical shift, then
++                 arithmetic for the rest */
++              r = gen_reg_rtx (SImode);
++              emit_insn (gen_lshiftrtsi_sc (r, operands[1], const1_rtx));
++              emit_insn (gen_ashrsi_ash (r, r, GEN_INT (1 - INTVAL (operands[2]))));
++              emit_move_insn (operands[0], r);
++            }
+         }
+     }
+   DONE;
+@@ -2074,9 +2173,12 @@
+    (set_attr "base_cost" "20")])
+ 
+ ;; 32 bit result from 16 bit operands
++;; The multiplicand must be in the even register of the result pair.  Tying
++;; the HImode operand to the SImode result ("0") let the register allocator
++;; put it into the odd (low) register instead, so it is moved explicitly.
+ (define_insn_and_split "mulhisi3"
+-  [(set (match_operand:SI 0 "register_operand" "=r,r")
+-	(mult:SI (sign_extend:SI (match_operand:HI 1 "register_operand" "%0,0"))
++  [(set (match_operand:SI 0 "register_operand" "=&r,&r")
++	(mult:SI (sign_extend:SI (match_operand:HI 1 "register_operand" "%r,r"))
+ 	         (sign_extend:SI (match_operand:HI 2 "general_operand" "rR,Qi"))))]
+   "TARGET_40_PLUS"
+   "#"
+@@ -2086,16 +2188,16 @@
+ 			 (sign_extend:SI (match_dup 2))))
+ 	      (clobber (reg:CC CC_REGNUM))])]
+   ""
+-  [(set_attr "length" "2,4")])
++  [(set_attr "length" "4,6")])
+ 
+ (define_insn "mulhisi3<cc_cc>"
+-  [(set (match_operand:SI 0 "register_operand" "=r,r")
+-	(mult:SI (sign_extend:SI (match_operand:HI 1 "register_operand" "%0,0"))
++  [(set (match_operand:SI 0 "register_operand" "=&r,&r")
++	(mult:SI (sign_extend:SI (match_operand:HI 1 "register_operand" "%r,r"))
+ 	      (sign_extend:SI (match_operand:HI 2 "general_operand" "rR,Qi"))))
+    (clobber (reg:CC CC_REGNUM))]
+   "TARGET_40_PLUS && reload_completed"
+-  "mul\t%2,%0"
+-  [(set_attr "length" "2,4")
++  "mov\t%1,%0\;mul\t%2,%0"
++  [(set_attr "length" "4,6")
+    (set_attr "base_cost" "20")])
+ 
+ ;;- divide

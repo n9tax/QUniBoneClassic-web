@@ -254,7 +254,7 @@ def catalog(platform):
                         "default_interface": "eth0"})
     boot_files = []
     if os.path.isdir(BOOT_DIR):
-        boot_files = sorted(f for f in os.listdir(BOOT_DIR) if f.endswith(".lst"))
+        boot_files = sorted(f for f in os.listdir(BOOT_DIR) if f.endswith((".lst", ".lda")))
     return {
         "platform": platform,
         "bus": "QBUS" if q else "UNIBUS",
@@ -509,7 +509,10 @@ def _generate_cmd(cfg, platform, cid):
                 bootfile = os.path.join(BOOT_DIR, c["boot"])
                 break
     if bootfile:
-        add("m ll %s\t# deposit boot loader" % bootfile)
+        if bootfile.lower().endswith(".lda"):
+            add("m lp %s\t# load program (absolute loader format)" % bootfile)
+        else:
+            add("m ll %s\t# deposit boot loader" % bootfile)
 
     any_spin = False
     for c in cat["controllers"]:
@@ -585,11 +588,37 @@ def _generate_cmd(cfg, platform, cid):
 
     add("")
     add(".print Configuration \"%s\" is up." % re.sub(r"[#\r\n]", " ", cfg.get("name", cid)))
-    if bootfile:
+    if bootfile and bootfile.lower().endswith(".lda"):
+        start = lda_start(bootfile)
+        if start is not None:
+            add(".print Program loaded: start it at %o in ODT (%og)." % (start, start))
+    elif bootfile:
         add(".print Boot loader at 10000: start 10000 for unit 0, 10010 for unit 1, ...")
     if cpu:
         add(".print Emulated CPU selected: \"p c 1\" toggles CONTINUE.")
     return "\n".join(L) + "\n"
+
+
+def lda_start(path):
+    """Start address of an absolute loader (.lda) file, or None."""
+    try:
+        with open(path, "rb") as f:
+            d = bytearray(f.read())
+    except (IOError, OSError):
+        return None
+    i = 0
+    while i + 6 <= len(d):
+        if d[i] != 1 or d[i + 1] != 0:
+            i += 1
+            continue
+        count = d[i + 2] | (d[i + 3] << 8)
+        addr = d[i + 4] | (d[i + 5] << 8)
+        if count < 6:
+            return None
+        if count == 6:
+            return None if addr & 1 else addr
+        i += count + 1
+    return None
 
 
 # ---------------------------------------------------------------------------

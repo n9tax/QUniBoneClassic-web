@@ -773,15 +773,17 @@ function builderSections(cfg) {
     bootRow.push(field("Controller", bindSelect(boot, "device",
       [["", "first enabled"]].concat(enabledCtl.map((c) => [c.key, c.label + " – " + c.boot])), null)));
   } else if (boot.mode === "file") {
-    bootRow.push(field("Listing in 10.02_devices/5_boot (or a path)",
-      el("span", {}, bindText(boot, "file", { list: "bootfiles", placeholder: "dl.lst" }),
+    bootRow.push(field("Listing (.lst) or program (.lda) in 10.02_devices/5_boot, or a path",
+      el("span", {}, bindText(boot, "file", { list: "bootfiles", placeholder: "dl.lst or net11.lda" }),
         el("datalist", { id: "bootfiles" }, cat.boot_files.map((f) => el("option", { value: f }))))));
   }
   out.push(el("section", { class: "unit" },
-    el("div", { class: "unit-head" }, el("h2", { text: "BOOTSTRAP" }), el("span", { class: "silk-dim", text: "m ll – MACRO-11 listing deposited at 10000" })),
+    el("div", { class: "unit-head" }, el("h2", { text: "BOOTSTRAP" }), el("span", { class: "silk-dim", text: "m ll .lst / m lp .lda – deposited into memory" })),
     el("div", { class: "row2" }, bootRow),
-    el("p", { class: "hint" }, "At the PDP-11 console, start the loader at ", el("code", { text: "10000" }),
-      " to boot unit 0, ", el("code", { text: "10010" }), " for unit 1, and so on.")));
+    el("p", { class: "hint" }, "At the PDP-11 console, start a boot loader at ", el("code", { text: "10000" }),
+      " to boot unit 0, ", el("code", { text: "10010" }), " for unit 1, and so on. A program in absolute loader format (",
+      el("code", { text: ".lda" }), ", like ", el("code", { text: "net11.lda" }), ") is started at its own address, ",
+      el("code", { text: "1000" }), " for net11; the console shows it after loading.")));
 
   // --- extra
   out.push(el("section", { class: "unit" },

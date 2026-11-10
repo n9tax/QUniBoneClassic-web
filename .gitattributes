@@ -46,3 +46,6 @@ makefile*  text eol=lf
 *.zip      binary
 *.gz       binary
 *.tgz      binary
+
+# PDP-11 absolute loader (papertape) images are binary
+*.lda      binary

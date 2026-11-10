@@ -13,6 +13,8 @@ program. This fork adds an easier way to run it, and an Ethernet controller.
 | **Autostart**: a fixed configuration, or one chosen by the DIP switches on the card | [`10.05_control`](10.05_control/README.md) | as above |
 | **Live devices**: switch controllers and drives on and off, spin RL drives up and down, change disk images, all while the PDP-11 runs | [`10.05_control`](10.05_control/README.md) | as above |
 | **DELQA Ethernet** (QBone): puts the PDP-11 on your LAN | [`10.02_devices/DELQA.md`](10.02_devices/DELQA.md) | new, tested on a PC against simulated PDP-11 memory; first hardware tests pending |
+| **net11**: a small TCP/IP system for the PDP-11 itself: DHCP, ping, DNS, NTP, a web server and telnet, booted from the panel | [`10.06_net11`](10.06_net11/README.md) | new, runs in a PDP-11/23 simulator with the QBone's DELQA logic; not yet on hardware |
+| **GCC fixes for the PDP-11**: four code generation bugs found while building net11, with a patch and a test generator | [`10.06_net11`](10.06_net11/README.md#gcc-fixes-for-the-pdp-11) | patch for GCC 13.3 |
 
 The changes are on the branch [`control-panel`](https://github.com/n9tax/QUniBoneClassic-web/tree/control-panel).
 
