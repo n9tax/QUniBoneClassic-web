@@ -1,0 +1,78 @@
+From 77c20cd0e7e71330dc2ab9656c32a29ba02ddac3 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 20:35:36 -0600
+Subject: [PATCH 10/13] ntpdate: port in network order, big-endian NTP time, 64
+ bit time_t; rc sets the clock
+
+---
+ Applications/netd/ntpdate.c                   | 28 ++++++++++++-------
+ .../platform-pdp11dec/build_fuzix_disk.sh     |  3 ++
+ 2 files changed, 21 insertions(+), 10 deletions(-)
+
+diff --git a/Applications/netd/ntpdate.c b/Applications/netd/ntpdate.c
+index 098c9f6f5..fe8da7ec2 100644
+--- a/Applications/netd/ntpdate.c
++++ b/Applications/netd/ntpdate.c
+@@ -81,7 +81,7 @@ void my_open( int argc, char *argv[]){
+ 	exit(1);
+     }
+ 
+-    addr.sin_port = port;
++    addr.sin_port = htons(port);
+     addr.sin_family = AF_INET;
+     if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+ 	perror("connect");
+@@ -141,19 +141,27 @@ int main( int argc, char *argv[] ){
+ 
+  process:
+ 
+-    uv = ptr->xmit.sec;
+-    uv -= 2208988800L;
+-    uv += tz * 60 * 60;
+-
+-    if (disflg || !setflg)
+-	printf(ctime((time_t *)&uv));
+-
+-    if (setflg){
+-	rv = stime((time_t *)&uv);
++    {
++	/* seconds since 1900, big-endian, at a 4-byte offset that may not
++	   suit a 32 bit load: take the bytes */
++	uint8_t *b = (uint8_t *)&ptr->xmit.sec;
++	time_t t;
++	uv = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
++	     ((uint32_t)b[2] << 8) | b[3];
++	uv -= 2208988800UL;
++	uv += tz * 60L * 60L;
++	t = uv;
++
++	if (disflg || !setflg)
++	    printf("%s", ctime(&t));
++
++	if (setflg){
++	    rv = stime(&t);
+ 	if (rv){
+ 	    perror( "stime" );
+ 	    exit(1);
+ 	}
++	}
+     }
+     exit(0);
+ }
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index 2723a6651..b2baf6d58 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -250,6 +250,9 @@ then
+ 	echo "network: `ifconfig | grep inet`"
+ 	telnetd &
+ 	httpd &
++	# the time, from the internet (in the background: it may take
++	# a while, or fail if there is no DNS server in /etc/resolv.conf)
++	ntpdate -s pool.ntp.org > /dev/null 2>&1 &
+ fi
+ RCEOF
+ cat > "$BUILDDIR/index.html" <<'WWWEOF'
+-- 
+2.56.0
+

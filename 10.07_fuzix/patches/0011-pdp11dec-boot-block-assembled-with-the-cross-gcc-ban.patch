@@ -1,0 +1,73 @@
+From 8a47932ee416cbf679d502456d5dc6d290b4ea72 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 20:39:27 -0600
+Subject: [PATCH 11/13] pdp11dec: boot block assembled with the cross gcc;
+ banner
+
+---
+ .../platform-pdp11dec/build_fuzix_disk.sh     | 24 +++++++------------
+ Kernel/platform/platform-pdp11dec/config.h    |  2 +-
+ 2 files changed, 9 insertions(+), 17 deletions(-)
+
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index b2baf6d58..10c1ef285 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -267,8 +267,13 @@ WWWEOF
+ 
+ # --- Assemble bootloader ---
+ echo "Assembling bootloader..."
+-PDP11_ASM="${PDP11_ASM:-pdp11_asm.py}"
+-$PDP11_ASM "$SCRIPTDIR/boot_fuzix.s" -o "$SCRIPTDIR/boot_fuzix.hex"
++$CC -c "$SCRIPTDIR/boot_fuzix_gas.S" -o "$BUILDDIR/boot.o"
++$LD -N -Ttext 0 -e 0 "$BUILDDIR/boot.o" -o "$BUILDDIR/boot.aout"
++$OBJCOPY -O binary "$BUILDDIR/boot.aout" "$BUILDDIR/boot.bin"
++if [ "$(stat -c %s "$BUILDDIR/boot.bin")" -gt 512 ]; then
++    echo "ERROR: boot block larger than 512 bytes"
++    exit 1
++fi
+ 
+ # --- Kernel size check ---
+ KERN_SIZE=$(stat -c %s "$KERNBIN")
+@@ -291,19 +296,7 @@ dd if=/dev/zero of="$RAW_IMG" bs=$SECTOR_SIZE count=$TOTAL_SECTORS status=none
+ 
+ # Write boot block (sectors 0-3, 1024 bytes)
+ # Convert assembler hex output to binary
+-python3 -c "
+-import sys
+-lines = open('$SCRIPTDIR/boot_fuzix.hex').readlines()
+-out = bytearray()
+-for line in lines:
+-    s = line.strip()
+-    if s:
+-        out.append(int(s, 16))
+-# Pad to boot block size (4 sectors × 256 bytes = 1024)
+-while len(out) < $((BOOT_SECTORS * SECTOR_SIZE)):
+-    out.append(0)
+-sys.stdout.buffer.write(out[:$((BOOT_SECTORS * SECTOR_SIZE))])
+-" | dd of="$RAW_IMG" bs=$SECTOR_SIZE seek=$BOOT_START conv=notrunc status=none
++cat "$BUILDDIR/boot.bin" | dd of="$RAW_IMG" bs=$SECTOR_SIZE seek=$BOOT_START conv=notrunc status=none
+ 
+ # Write kernel at sector 4
+ echo "Writing kernel at sector $KERN_START..."
+@@ -534,7 +527,6 @@ sys.stdout.buffer.write(out)
+ " > "$SD_IMG"
+ 
+ # --- Clean up temp files ---
+-rm -f "$SCRIPTDIR/boot_fuzix.hex"
+ rm -rf "$BUILDDIR"
+ # Keep $FSIMG for ucp access (ucp can't handle partitioned images)
+ 
+diff --git a/Kernel/platform/platform-pdp11dec/config.h b/Kernel/platform/platform-pdp11dec/config.h
+index eed095d92..3969a44f9 100644
+--- a/Kernel/platform/platform-pdp11dec/config.h
++++ b/Kernel/platform/platform-pdp11dec/config.h
+@@ -75,4 +75,4 @@
+ #define NBUFS    4        /* Number of block buffers */
+ #define NMOUNTS	 1	  /* Number of mounts at a time */
+ 
+-#define plt_copyright() kprintf("PDP-11 updates (c) 2026 Stensat Group LLC in association with Claude Opus 4.6/4.8, and Fable 5\n")
++#define plt_copyright() kprintf("PDP-11 port (c) 2026 Stensat Group LLC; DEC MMU, DEQNA/DELQA and QBone port 2026\n")
+-- 
+2.56.0
+

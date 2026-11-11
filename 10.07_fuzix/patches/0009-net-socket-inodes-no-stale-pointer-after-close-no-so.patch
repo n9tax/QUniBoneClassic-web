@@ -1,0 +1,78 @@
+From f5e47e3927d208f15808a9e3f1d98cb35b7c7d0f Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 20:29:27 -0600
+Subject: [PATCH 09/13] net: socket inodes: no stale pointer after close, no
+ socket number left in i_addr[0]; daemon events only for unreported changes;
+ pdp11dec: panic halts to ODT
+
+---
+ Kernel/dev/net/net_native.c               | 11 ++++++++---
+ Kernel/platform/platform-pdp11dec/pdp11.S |  3 ++-
+ Kernel/syscall_net.c                      |  8 ++++++++
+ 3 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/Kernel/dev/net/net_native.c b/Kernel/dev/net/net_native.c
+index cc8ec2e72..9e55902eb 100644
+--- a/Kernel/dev/net/net_native.c
++++ b/Kernel/dev/net/net_native.c
+@@ -161,8 +161,10 @@ int netdev_write(uint8_t flags)
+ 			/* FIXME: You re-use something you pays the price.
+ 			   Probably should switch to using data 0 as devices do?
+ 			 */
+-			s->s_ino->c_node.i_nlink = 0;
+-			s->s_ino->c_flags |= CDIRTY;
++			if (s->s_ino) {
++				s->s_ino->c_node.i_nlink = 0;
++				s->s_ino->c_flags |= CDIRTY;
++			}
+ 			netproto_free(s);
+ 		}
+ 		else
+@@ -198,7 +200,10 @@ static struct sockdata *netdev_findevent(void)
+ {
+ 	struct sockdata *sd = sockdata;
+ 	while (sd != sockdata + NSOCKET) {
+-		if (sd->event)
++		/* Only events not yet reported: NEVW_STATE stays set while
++		   the socket waits for the daemon, and must not make this
++		   socket hide all the others behind it */
++		if (sd->event & NEV_MASK)
+ 			return sd;
+ 		sd++;
+ 	}
+diff --git a/Kernel/platform/platform-pdp11dec/pdp11.S b/Kernel/platform/platform-pdp11dec/pdp11.S
+index bd223b81c..cccd8527d 100644
+--- a/Kernel/platform/platform-pdp11dec/pdp11.S
++++ b/Kernel/platform/platform-pdp11dec/pdp11.S
+@@ -15,7 +15,8 @@ init_early:
+ _plt_monitor:
+ _plt_reboot:
+ 	bis $0340,*$0177776	/* IRQ off */
+-	jmp _plt_reboot
++1:	halt			/* to the console ODT; 1000g... reboots */
++	br 1b
+ 
+ 	.bss
+ 	.even
+diff --git a/Kernel/syscall_net.c b/Kernel/syscall_net.c
+index 0658b0412..c96360a48 100644
+--- a/Kernel/syscall_net.c
++++ b/Kernel/syscall_net.c
+@@ -277,6 +277,14 @@ int sock_close(inoptr ino)
+ {
+ 	udata.u_net.sock = IN2SOCK(ino);
+ 	net_close();
++	/* The inode goes away as we return (it was never linked): the
++	   socket must not keep pointing at its slot, which another file
++	   may get next */
++	sockets[udata.u_net.sock].s_ino = NULL;
++	/* and the inode goes back to the free pool on disk: it must not
++	   carry the socket number as a block address into its next life
++	   (a pipe would take it for its first data block) */
++	IN2SOCK(ino) = 0;
+ 	/* And needs the final closedown to be asynchronous for the net layer
+ 	   so be careful when we free stuff up */
+ 	return udata.u_retval;
+-- 
+2.56.0
+

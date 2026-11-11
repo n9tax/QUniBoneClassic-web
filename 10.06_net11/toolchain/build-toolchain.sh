@@ -1,7 +1,7 @@
 #!/bin/bash
 # build-toolchain.sh - build a pdp11-aout cross compiler for net11:
 # GNU binutils 2.42 and GCC 13.3.0 (C only) with the PDP-11 code generation
-# fixes in gcc-13-pdp11-shift-mul-cmp.patch.
+# fixes in gcc-13-pdp11-fixes.patch.
 #
 #   ./build-toolchain.sh [install prefix]      default: ./pdp11-tools
 #
@@ -21,7 +21,7 @@ mkdir -p "$WORK" && cd "$WORK"
 [ -d binutils-2.42 ] || tar xf binutils-2.42.tar.xz
 if [ ! -d gcc-13.3.0 ]; then
     tar xf gcc-13.3.0.tar.xz
-    (cd gcc-13.3.0 && patch -p1 < "$HERE/gcc-13-pdp11-shift-mul-cmp.patch")
+    (cd gcc-13.3.0 && patch -p1 < "$HERE/gcc-13-pdp11-fixes.patch")
 fi
 
 mkdir -p b-binutils && cd b-binutils

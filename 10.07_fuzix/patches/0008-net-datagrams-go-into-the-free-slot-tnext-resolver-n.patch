@@ -1,0 +1,141 @@
+From f95abf3642f79f5955111a3d15c11470ffbe4916 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 19:43:00 -0600
+Subject: [PATCH 08/13] net: datagrams go into the free slot (tnext); resolver:
+ network byte order, no unaligned access
+
+---
+ Applications/netd/gethostbyname.c | 52 +++++++++++++++----------------
+ Kernel/dev/net/net_native.c       |  5 +--
+ 2 files changed, 28 insertions(+), 29 deletions(-)
+
+diff --git a/Applications/netd/gethostbyname.c b/Applications/netd/gethostbyname.c
+index b124a59cc..796647c8f 100644
+--- a/Applications/netd/gethostbyname.c
++++ b/Applications/netd/gethostbyname.c
+@@ -60,9 +60,9 @@ static int send_question( char *name ){
+     char *l = o++;
+ 
+     memset( p, 0, sizeof(buf) );
+-    p->id = 42;     /* "random" query ID */
++    p->id = htons(42);     /* "random" query ID */
+     p->cntl = 0x1;  /* request a recursive query */
+-    p->qdcount = 1; /* one question */
++    p->qdcount = htons(1); /* one question */
+     /* fill out name string */
+ 
+     while(1){
+@@ -79,12 +79,9 @@ static int send_question( char *name ){
+     *l = o - l - 1;
+     *o++ = 0;
+     /* fill out rest of RR */
+-    t = (struct RRtail *)o;
+-    /* type: A record */
+-    t->type = htons(1);
+-    /* class: inet */
+-    t->class = htons(1);
+-    o += 4;
++    /* type A, class inet; bytes, as o may be odd */
++    *o++ = 0; *o++ = 1;
++    *o++ = 0; *o++ = 1;
+     
+     write( fd, buf, (int)(o - buf) );
+     return 0;    
+@@ -183,10 +180,13 @@ struct hostent *gethostbyname( char *name ){
+     alarm(0);
+     {
+ 	struct header *h = (struct header *)buf;
+-	struct RRtail *t;
+-	int i,j;
++	int i, j, qd, an, type, rdlen;
+ 
+-	if( h->id != 42 )  /* correct session ID ? */
++	/* Record fields can be at odd addresses: read them as bytes,
++	   in network order */
++#define GET16(p) (((uint8_t)(p)[0] << 8) | (uint8_t)(p)[1])
++
++	if( ntohs(h->id) != 42 )  /* correct session ID ? */
+ 	    goto error;
+ 
+ 	if( ! (h->cntl & 0x80) )  /* is an answer packet? */
+@@ -195,12 +195,14 @@ struct hostent *gethostbyname( char *name ){
+ 	if( ! (h->ret & 0x80) )  /* is a recursive answer? */
+ 	    goto error;
+ 
+-	if( ! h->ancount ) /* is there any answers? */
++	an = ntohs(h->ancount);
++	qd = ntohs(h->qdcount);
++	if( ! an ) /* is there any answers? */
+ 	    goto error;
+ 
+ 	/* skip over our question(s) */
+ 	ptr = buf + sizeof( struct header );
+-	for( i = 0; i < h->qdcount && i < 4; i++ ){
++	for( i = 0; i < qd && i < 4; i++ ){
+ 	    while(1){
+ 		if( *ptr == 0 ){
+ 		    ptr++;
+@@ -214,11 +216,8 @@ struct hostent *gethostbyname( char *name ){
+ 	    }
+ 	    ptr +=4;
+ 	}
+-	/* cap answers at MAXADDRS */
+-	if( h->ancount > MAXADDRS )
+-	    h->ancount = MAXADDRS;
+-	/* Iterate over answers */
+-	for( i = 0; i < h->ancount; i++ ){
++	/* Iterate over answers, keep up to MAXADDRS addresses */
++	for( i = 0; i < an && lno < MAXADDRS && ptr < buf + x; i++ ){
+ 	    /* parse off name */
+ 	    while(1){
+ 		if( *ptr == 0 ){
+@@ -231,18 +230,17 @@ struct hostent *gethostbyname( char *name ){
+ 		}
+ 		ptr += *ptr + 1;
+ 	    }
+-	    /* point to rest of RR structure */
+-	    t = (struct RRtail *)ptr;
+-	    ptr += sizeof( struct RRtail);
+-	    if( t->type == 0x01 ){
+-		for( j=0; j<t->rdlen; j++ )
+-		    addrs[lno][j] = *ptr++;
++	    /* type(2) class(2) ttl(4) rdlen(2) */
++	    type = GET16(ptr);
++	    rdlen = GET16(ptr + 8);
++	    ptr += 10;
++	    if( type == 1 && rdlen == 4 ){
++		for( j=0; j<4; j++ )
++		    addrs[lno][j] = ptr[j];
+ 		list[lno] = &addrs[lno][0];
+ 		lno++;
+ 	    }
+-	    else{
+-		ptr += t->rdlen;
+-	    }
++	    ptr += rdlen;
+ 	}
+ 	list[lno] = NULL;
+     }
+diff --git a/Kernel/dev/net/net_native.c b/Kernel/dev/net/net_native.c
+index b4fe63549..cc8ec2e72 100644
+--- a/Kernel/dev/net/net_native.c
++++ b/Kernel/dev/net/net_native.c
+@@ -529,12 +529,13 @@ uint16_t netn_putbuf(struct socket *s)
+ #ifdef CONFIG_FLAT
+ 	if (bmem)
+ 		ubase_to_bmem(bmem + (s->s_num * SOCKBUFOFF + RXBUFOFF +
+-			sd->tbuf * TXPKTSIZ), udata.u_count - udata.u_done);
++			sd->tnext * TXPKTSIZ), udata.u_count - udata.u_done);
+ #endif
+ 	if (net_ino) {
+ 		udata.u_sysio = false;
+ 		udata.u_offset =
+-			s->s_num * SOCKBUFOFF + RXBUFOFF + sd->tbuf * TXPKTSIZ;
++			s->s_num * SOCKBUFOFF + RXBUFOFF + sd->tnext * TXPKTSIZ;
++		/* the slot being filled is tnext (tbuf is the daemon's) */
+ 		/* FIXME: check writei returns and readi returns properly */
+ 		writei(net_ino, 0);
+ 	}
+-- 
+2.56.0
+

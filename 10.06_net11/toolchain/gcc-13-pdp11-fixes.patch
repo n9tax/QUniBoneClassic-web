@@ -220,3 +220,36 @@
     (set_attr "base_cost" "20")])
  
  ;;- divide
+--- a/gcc/config/pdp11/pdp11.cc
++++ b/gcc/config/pdp11/pdp11.cc
+@@ -656,9 +656,27 @@
+       output_asm_insn ("sub\t%1,%0", adjops);
+     }
+ 
+-  /* Do the words.  */
+-  for (i = 0; i < words; i++)
+-    output_asm_insn (singlemove_string (exops[i]), exops[i]);
++  /* Do the words.  A load whose address uses one of the destination
++     registers (mov (r0),r0 / mov 2(r0),r1 would load the second word
++     through the clobbered pointer) must load that register last.  The
++     source words are at fixed offsets here, so their order is free.  */
++  if (REG_P (operands[0]) && MEM_P (operands[1])
++      && action[1] == no_action
++      && reg_overlap_mentioned_p (operands[0], XEXP (operands[1], 0)))
++    {
++      int last = -1;
++      for (i = 0; i < words; i++)
++	if (reg_overlap_mentioned_p (exops[i][0], XEXP (operands[1], 0)))
++	  last = i;
++      for (i = 0; i < words; i++)
++	if (i != last)
++	  output_asm_insn (singlemove_string (exops[i]), exops[i]);
++      if (last >= 0)
++	output_asm_insn (singlemove_string (exops[last]), exops[last]);
++    }
++  else
++    for (i = 0; i < words; i++)
++      output_asm_insn (singlemove_string (exops[i]), exops[i]);
+ 
+   /* Check for increment after.  */
+   if (action[0] == inc_after)

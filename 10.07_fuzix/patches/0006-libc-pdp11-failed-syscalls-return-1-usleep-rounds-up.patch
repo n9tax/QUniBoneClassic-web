@@ -1,0 +1,143 @@
+From 019f7a3b0ac8db8a4ca111e679cbabcf53ac8940 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 19:00:04 -0600
+Subject: [PATCH 06/13] libc pdp11: failed syscalls return -1; usleep rounds
+ up; telnetd works (sh -i, partial writes, no inherited SIGCHLD ignore)
+
+---
+ Applications/netd/telnetd.c   | 38 ++++++++++++++++++++++++++---------
+ Library/libs/usleep.c         |  6 +++++-
+ Library/tools/syscall_pdp11.c |  1 +
+ 3 files changed, 35 insertions(+), 10 deletions(-)
+
+diff --git a/Applications/netd/telnetd.c b/Applications/netd/telnetd.c
+index dc1e85719..29a68b6db 100644
+--- a/Applications/netd/telnetd.c
++++ b/Applications/netd/telnetd.c
+@@ -25,6 +25,7 @@
+ #include <signal.h>
+ #include <pwd.h>
+ #include <sys/wait.h>
++#include <syscalls.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+@@ -42,9 +43,25 @@
+ static int net;			/* the connection */
+ static int shell_pid;
+ 
++/* Write it all: the socket may be non-blocking and take part of it */
++static void net_write(const char *p, int n)
++{
++	int k;
++	while (n > 0) {
++		k = write(net, p, n);
++		if (k > 0) {
++			p += k;
++			n -= k;
++		} else if (k < 0 && errno != EAGAIN && errno != EINTR)
++			return;
++		else
++			_pause(1);
++	}
++}
++
+ static void netputs(const char *s)
+ {
+-	write(net, s, strlen(s));
++	net_write(s, strlen(s));
+ }
+ 
+ /* Write shell output to the network, newline -> CR LF */
+@@ -60,12 +77,12 @@ static void to_net(const char *p, int n)
+ 			out[o++] = (char)IAC;	/* escape it */
+ 		out[o++] = c;
+ 		if (o >= (int)sizeof(out) - 2) {
+-			write(net, out, o);
++			net_write(out, o);
+ 			o = 0;
+ 		}
+ 	}
+ 	if (o)
+-		write(net, out, o);
++		net_write(out, o);
+ }
+ 
+ /* Network input state machine: telnet commands, line ends */
+@@ -188,7 +205,7 @@ static void session(void)
+ 	char *shell;
+ 	static char env_home[64], env_user[40];
+ 	char *envp[5];
+-	char *argv[2];
++	char *argv[3];
+ 
+ 	netputs("\r\nFuzix on a PDP-11\r\n\r\n");
+ 	pw = login();
+@@ -225,9 +242,10 @@ static void session(void)
+ 		envp[3] = "TERM=dumb";
+ 		envp[4] = NULL;
+ 		shell = pw->pw_shell[0] ? pw->pw_shell : "/bin/sh";
+-		/* "-sh" would read a profile; plain sh, interactive */
++		/* interactive (prompts) although its input is a pipe */
+ 		argv[0] = "sh";
+-		argv[1] = NULL;
++		argv[1] = "-i";
++		argv[2] = NULL;
+ 		execve(shell, argv, envp);
+ 		_exit(127);
+ 	}
+@@ -262,9 +280,9 @@ static void session(void)
+ 			idle = 0;
+ 		else if (idle < 10)
+ 			idle++;
+-		/* poll quickly while there is traffic, slower when idle */
++		/* idle: sleep a tenth of a second (the shortest sleep) */
+ 		if (!busy)
+-			usleep(idle < 10 ? 20000 : 100000);
++			_pause(1);
+ 	}
+ 	kill(-shell_pid, SIGHUP);
+ 	close(tosh[1]);
+@@ -296,7 +314,9 @@ int main(int argc, char *argv[])
+ 		perror("telnetd: listen");
+ 		return 1;
+ 	}
+-	signal(SIGCHLD, SIG_IGN);
++	/* Finished sessions are collected below.  (Not SIGCHLD ignored:
++	   that is inherited through exec and the shell's own wait() for
++	   its commands would never return.) */
+ 	for (;;) {
+ 		net = accept(lfd, NULL, NULL);
+ 		if (net < 0) {
+diff --git a/Library/libs/usleep.c b/Library/libs/usleep.c
+index fc13fa689..66183ad08 100644
+--- a/Library/libs/usleep.c
++++ b/Library/libs/usleep.c
+@@ -5,7 +5,11 @@
+ #include <signal.h>
+ #include <syscalls.h>
+ 
++/* _pause() counts tenths of a second, and _pause(0) waits for a signal:
++   round up, so that a short sleep is a short sleep */
+ int usleep(useconds_t us)
+ {
+-	return _pause(us/100000UL);
++	if (us == 0)
++		return 0;
++	return _pause((us + 99999UL) / 100000UL);
+ }
+diff --git a/Library/tools/syscall_pdp11.c b/Library/tools/syscall_pdp11.c
+index 9ca512fb7..2635b99f2 100644
+--- a/Library/tools/syscall_pdp11.c
++++ b/Library/tools/syscall_pdp11.c
+@@ -52,6 +52,7 @@ static void write_call(int n)
+   fprintf(fp, "\ttrap $%d\n", n);
+   fprintf(fp, "\ttst r1\n\tbeq noerr\n");
+   fprintf(fp, "\tmov r1,_errno\n");
++  fprintf(fp, "\tmov $-1,r0\n");	/* failed calls return -1 */
+   fprintf(fp, "\tnoerr:\n");
+   switch(args) {
+     case 4:
+-- 
+2.56.0
+

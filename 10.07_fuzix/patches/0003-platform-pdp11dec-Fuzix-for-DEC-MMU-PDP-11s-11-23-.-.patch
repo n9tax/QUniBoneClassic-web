@@ -1,0 +1,3484 @@
+From cc18347f573833258a8c460515d6203cfb3e5ce0 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 17:32:46 -0600
+Subject: [PATCH 03/13] platform-pdp11dec: Fuzix for DEC MMU PDP-11s (11/23
+ ...): 48 KB kernel, MFPI/MTPI user access, banks sized from memory, user
+ traps as signals
+
+---
+ Kernel/platform/platform-pdp11dec/Makefile    |  45 ++
+ Kernel/platform/platform-pdp11dec/README      |  18 +
+ .../platform-pdp11dec/boot_fuzix_gas.S        | 118 ++++
+ .../platform-pdp11dec/build_fuzix_disk.sh     | 489 ++++++++++++++
+ Kernel/platform/platform-pdp11dec/config.h    |  74 +++
+ Kernel/platform/platform-pdp11dec/crt0.S      |  18 +
+ Kernel/platform/platform-pdp11dec/dev_rl.c    | 268 ++++++++
+ Kernel/platform/platform-pdp11dec/dev_rl.h    |  11 +
+ Kernel/platform/platform-pdp11dec/device.h    |   6 +
+ Kernel/platform/platform-pdp11dec/devices.c   |  43 ++
+ Kernel/platform/platform-pdp11dec/devtty.c    | 144 ++++
+ Kernel/platform/platform-pdp11dec/devtty.h    |  11 +
+ Kernel/platform/platform-pdp11dec/divmod.S    |  70 ++
+ .../platform/platform-pdp11dec/fuzix.export   |   0
+ Kernel/platform/platform-pdp11dec/fuzix.ld    |  58 ++
+ .../platform/platform-pdp11dec/fuzix_simh.ini |  25 +
+ Kernel/platform/platform-pdp11dec/init.c      | 102 +++
+ Kernel/platform/platform-pdp11dec/libc.c      |  40 ++
+ Kernel/platform/platform-pdp11dec/main.c      | 172 +++++
+ .../platform-pdp11dec/make_fuzix_bin.py       |  81 +++
+ Kernel/platform/platform-pdp11dec/pdp11.S     | 623 ++++++++++++++++++
+ .../platform-pdp11dec/pdp11_endian_fix.py     |  70 ++
+ Kernel/platform/platform-pdp11dec/rules.mk    |  12 +
+ Kernel/platform/platform-pdp11dec/sigtest.c   | 118 ++++
+ Kernel/platform/platform-pdp11dec/target.mk   |   1 +
+ Kernel/platform/platform-pdp11dec/tricks.S    | 389 +++++++++++
+ Kernel/platform/platform-pdp11dec/user.ld     |  51 ++
+ .../platform/platform-pdp11dec/usermem_mfpi.S | 188 ++++++
+ .../platform-pdp11dec/usermem_std-pdp11.S     |   0
+ 29 files changed, 3245 insertions(+)
+ create mode 100644 Kernel/platform/platform-pdp11dec/Makefile
+ create mode 100644 Kernel/platform/platform-pdp11dec/README
+ create mode 100644 Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
+ create mode 100755 Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+ create mode 100644 Kernel/platform/platform-pdp11dec/config.h
+ create mode 100644 Kernel/platform/platform-pdp11dec/crt0.S
+ create mode 100644 Kernel/platform/platform-pdp11dec/dev_rl.c
+ create mode 100644 Kernel/platform/platform-pdp11dec/dev_rl.h
+ create mode 100644 Kernel/platform/platform-pdp11dec/device.h
+ create mode 100644 Kernel/platform/platform-pdp11dec/devices.c
+ create mode 100644 Kernel/platform/platform-pdp11dec/devtty.c
+ create mode 100644 Kernel/platform/platform-pdp11dec/devtty.h
+ create mode 100644 Kernel/platform/platform-pdp11dec/divmod.S
+ create mode 100644 Kernel/platform/platform-pdp11dec/fuzix.export
+ create mode 100644 Kernel/platform/platform-pdp11dec/fuzix.ld
+ create mode 100644 Kernel/platform/platform-pdp11dec/fuzix_simh.ini
+ create mode 100644 Kernel/platform/platform-pdp11dec/init.c
+ create mode 100644 Kernel/platform/platform-pdp11dec/libc.c
+ create mode 100644 Kernel/platform/platform-pdp11dec/main.c
+ create mode 100644 Kernel/platform/platform-pdp11dec/make_fuzix_bin.py
+ create mode 100644 Kernel/platform/platform-pdp11dec/pdp11.S
+ create mode 100644 Kernel/platform/platform-pdp11dec/pdp11_endian_fix.py
+ create mode 100644 Kernel/platform/platform-pdp11dec/rules.mk
+ create mode 100644 Kernel/platform/platform-pdp11dec/sigtest.c
+ create mode 100644 Kernel/platform/platform-pdp11dec/target.mk
+ create mode 100644 Kernel/platform/platform-pdp11dec/tricks.S
+ create mode 100644 Kernel/platform/platform-pdp11dec/user.ld
+ create mode 100644 Kernel/platform/platform-pdp11dec/usermem_mfpi.S
+ create mode 100644 Kernel/platform/platform-pdp11dec/usermem_std-pdp11.S
+
+diff --git a/Kernel/platform/platform-pdp11dec/Makefile b/Kernel/platform/platform-pdp11dec/Makefile
+new file mode 100644
+index 000000000..5fda23c30
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/Makefile
+@@ -0,0 +1,45 @@
++
++CSRCS = devtty.c
++CSRCS += devices.c main.c libc.c dev_rl.c
++
++ASRCS = pdp11.S crt0.S
++ASRCS += tricks.S divmod.S usermem_mfpi.S
++
++DSRCS = 
++DOBJS = $(patsubst ../../dev/%.c,%.o, $(DSRCS))
++
++COBJS = $(CSRCS:.c=$(BINEXT))
++AOBJS = $(ASRCS:.S=.o)
++OBJS  = $(COBJS) $(AOBJS) $(DOBJS)
++
++JUNK = $(CSRCS:.c=.o) $(ASRCS:.S=.o)
++
++all:	$(OBJS)
++
++# config.h geometry is baked into every object (see rules.mk for
++# the same dependency on the core kernel objects)
++$(OBJS): config.h
++
++$(COBJS): %.o: %.c
++	$(CROSS_CC) $(CROSS_CCOPTS) -c $<
++
++$(AOBJS): %.o: %.S
++	$(CROSS_AS) $(ASOPTS) $< -o $*.o
++
++$(DOBJS): %.o: ../../dev/%.c
++	$(CROSS_CC) $(CROSS_CCOPTS) -c $<
++
++clean:
++	rm -f $(OBJS) $(JUNK)  core *~ 
++
++image:
++	$(CROSS_LD) -M -o fuzix.aout -T fuzix.ld \
++	crt0.o \
++	../../start.o ../../version.o ../../cpu-pdp11/lowlevel-pdp11.o \
++	main.o ../../swap.o ../../timer.o ../../bankfixed.o ../../kdata.o devices.o \
++	../../tty.o ../../devio.o ../../filesys.o ../../process.o ../../inode.o ../../syscall_fs.o \
++	pdp11.o ../../syscall_proc.o ../../syscall_other.o ../../mm.o ../../memalloc_none.o \
++	../../devsys.o ../../usermem.o ../../syscall_exec.o ../../syscall_exec16.o \
++	../../syscall_fs2.o tricks.o ../../syscall_fs3.o ../../blk512.o \
++	usermem_mfpi.o devtty.o libc.o dev_rl.o > ../../fuzix.map
++	pdp11-aout-objcopy fuzix.aout -O binary ../../fuzix.bin
+diff --git a/Kernel/platform/platform-pdp11dec/README b/Kernel/platform/platform-pdp11dec/README
+new file mode 100644
+index 000000000..9ee34d560
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/README
+@@ -0,0 +1,18 @@
++At the moment this is just build testing and seeing what in the toolchain
++breaks.
++
++Once it all builds and the syscall and some minimal driver code is filled in
++it ought to come in at about 20KW for a pure swap based system so probably
++not useful on an MMUless /11 except for testing.
++
++Boot notes:
++	start block with nop apparently sometimes needed
++	Generally first block, but on rx appears to be first sector of track 1
++	(not 0 as expected)
++
++Boot logic:
++	Load inode 1 (hardcoded offset)
++	Walk direct link blocks looking for /bootstrap
++	Load only direct blocks of the referenced inode
++
++	Run /bootstrap
+diff --git a/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S b/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
+new file mode 100644
+index 000000000..9c76acb70
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
+@@ -0,0 +1,118 @@
++/*
++ * Fuzix RL02 boot block, GNU as version of boot_fuzix.s.
++ *
++ * A DEC RL boot ROM (or SIMH "boot rl0", or the QBone RL loader) reads
++ * the first 512 bytes of the disk to address 0 and starts at 0.  This
++ * code fits in those 512 bytes.  It loads the kernel from RL02 sectors
++ * 4.. (256 bytes each) to address 01000 and jumps there.
++ *
++ * Numbers are octal when they start with 0, decimal otherwise.
++ */
++	.text
++RLCS	= 0174400
++RLBA	= 0174402
++RLDA	= 0174404
++RLMP	= 0174406
++XCSR	= 0177564
++XBUF	= 0177566
++
++KERN_START = 4
++KERN_NSECT = 190		/* up to 0xC000: 47.5 KB */
++KERN_ADDR  = 01000
++
++	.globl	start
++start:
++	nop			/* boot block signature */
++	br	boot
++
++	. = start + 040
++boot:
++	mov	$0340, @$0177776
++	mov	$KERN_ADDR, sp
++	mov	$msg, r0
++	jsr	pc, puts
++
++	clr	curcyl
++	mov	$KERN_ADDR, r2		/* destination */
++	mov	$KERN_START, r3		/* linear sector */
++	mov	$KERN_NSECT, r4		/* count */
++
++next:
++	tstb	@$RLCS
++	bpl	next
++	/* cylinder = r3 / 80, r0 = r3 % 80 */
++	mov	r3, r0
++	clr	r5
++1:	cmp	r0, $80
++	blo	2f
++	sub	$80, r0
++	inc	r5
++	br	1b
++2:	cmp	r5, curcyl
++	beq	noseek
++
++	/* seek: difference in bits 15:7, bit 2 = outward */
++	mov	r5, r1
++	sub	curcyl, r1
++	bpl	3f
++	neg	r1
++	ash	$7, r1
++	br	4f
++3:	ash	$7, r1
++	bis	$4, r1
++4:	bis	$1, r1			/* marker bit, as DEC's seek uses */
++	mov	r1, @$RLDA
++	mov	$6, @$RLCS		/* seek */
++5:	tstb	@$RLCS
++	bpl	5b
++	tst	@$RLCS
++	bmi	error
++	mov	r5, curcyl
++
++noseek:
++	clr	r1
++	cmp	r0, $40
++	blo	6f
++	sub	$40, r0
++	bis	$0100, r1		/* head 1 */
++6:	bis	r0, r1
++	mov	r5, r0
++	ash	$7, r0
++	bis	r0, r1
++	mov	r2, @$RLBA
++	mov	r1, @$RLDA
++	mov	$-128, @$RLMP		/* 128 words */
++	mov	$014, @$RLCS		/* read data */
++7:	tstb	@$RLCS
++	bpl	7b
++	tst	@$RLCS
++	bmi	error
++	add	$256, r2
++	inc	r3
++	dec	r4
++	bne	next
++
++	mov	$crlf, r0
++	jsr	pc, puts
++	jmp	@$KERN_ADDR
++
++error:
++	mov	$errmsg, r0
++	jsr	pc, puts
++	halt
++	br	error
++
++puts:
++	tstb	@$XCSR
++	bpl	puts
++	movb	(r0)+, r1
++	beq	1f
++	mov	r1, @$XBUF
++	br	puts
++1:	rts	pc
++
++msg:	.asciz	"\r\nLoading Fuzix..."
++crlf:	.asciz	"\r\n"
++errmsg:	.asciz	"\r\nRL11 error\r\n"
++	.even
++curcyl:	.word	0
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+new file mode 100755
+index 000000000..8c5e0df41
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -0,0 +1,489 @@
++#!/bin/bash
++#
++# Build Fuzix RL02 disk image for STENSAT PDP-11/20 FPGA
++#
++# Produces two images:
++#   fuzix_rl02.dsk     — raw 256-byte sectors (SIMH compatible)
++#   fuzix_rl02_sd.dsk  — expanded 512-byte SD sectors (256 data + 256 × 0xFF pad)
++#
++# Disk layout (in RL02 sectors of 256 bytes):
++#   Sectors  0-3       Boot block (1024 bytes, ROM loads to address 0)
++#   Sectors  4-127     Kernel image
++#   Sectors  128-16383 Root filesystem (~8 MB)
++#   Sectors  16384-20479 Swap partition (~2 MB)
++#
++
++set -e
++
++SCRIPTDIR="$(cd "$(dirname "$0")" && pwd)"
++FUZIXDIR="$(cd "$SCRIPTDIR/../../.." && pwd)"
++TOOLDIR="$FUZIXDIR/Standalone"
++KERNBIN="$FUZIXDIR/Kernel/fuzix.bin"
++
++# RL02 geometry
++SECTOR_SIZE=256
++TOTAL_SECTORS=40960   # 512 cyl × 2 heads × 40 sectors
++
++# Partition layout (in RL02 sectors)
++BOOT_START=0
++BOOT_SECTORS=4        # 1024 bytes
++KERN_START=4
++KERN_RESERVED=252     # sectors 4-255 (64KB max kernel)
++FS_START=256
++FS_SECTORS=16128      # sectors 256-16383
++SWAP_START=16384
++SWAP_SECTORS=4096     # sectors 16384-20479
++
++# Filesystem parameters
++FS_INODES=64          # 64 inode blocks × 8 inodes/block = 512 inodes
++FS_BLOCKS=$((FS_SECTORS / 2))  # Fuzix 512-byte blocks
++
++RAW_IMG="$SCRIPTDIR/fuzix_rl02.dsk"
++SD_IMG="$SCRIPTDIR/fuzix_rl02_sd.dsk"
++FSIMG="$SCRIPTDIR/fuzix_rootfs.img"
++
++echo "=== Fuzix RL02 Disk Image Builder ==="
++echo ""
++
++# --- Check prerequisites ---
++if [ ! -f "$KERNBIN" ]; then
++    echo "ERROR: Kernel not found: $KERNBIN"
++    echo "  Build: cd $FUZIXDIR/Kernel && make TARGET=pdp11dec"
++    exit 1
++fi
++
++if [ ! -f "$TOOLDIR/mkfs" ]; then
++    echo "ERROR: mkfs not found. Build: cd $TOOLDIR && make"
++    exit 1
++fi
++
++# --- Cross-compile settings ---
++CC=pdp11-aout-gcc
++LD=pdp11-aout-ld
++OBJCOPY=pdp11-aout-objcopy
++SIZE=pdp11-aout-size
++LIBDIR="$FUZIXDIR/Library/libs"
++INCDIR="$FUZIXDIR/Library/include"
++CFLAGS="-fno-strict-aliasing -fomit-frame-pointer -fno-builtin -msoft-float -Os -I$INCDIR -I$INCDIR/pdp11"
++LDFLAGS="-L$LIBDIR -lcpdp11 -lgcc $($CC -print-libgcc-file-name) -T$SCRIPTDIR/user.ld"
++CRT0="$LIBDIR/crt0_pdp11.o"
++UTILDIR="$FUZIXDIR/Applications/util"
++BUILDDIR="$SCRIPTDIR/build"
++
++mkdir -p "$BUILDDIR"
++
++# --- Self-heal userland build prerequisites (lost to git clean) ---
++# <sys/userstructs.h> is installed from the kernel tree by the
++# Library makefiles; the cross gcc was built --disable-libgcc so its
++# support routines come from gcclib-pdp11.c here.
++if [ ! -f "$INCDIR/sys/userstructs.h" ]; then
++    install -m 0644 "$FUZIXDIR/Kernel/include/userstructs.h" "$INCDIR/sys/"
++fi
++if [ ! -f "$LIBDIR/libgcc.a" ] || [ "$LIBDIR/gcclib-pdp11.c" -nt "$LIBDIR/libgcc.a" ]; then
++    echo "Building libgcc.a (gcclib-pdp11.c)..."
++    $CC $CFLAGS -c "$LIBDIR/gcclib-pdp11.c" -o "$BUILDDIR/gcclib-pdp11.o"
++    rm -f "$LIBDIR/libgcc.a"
++    pdp11-aout-ar rc "$LIBDIR/libgcc.a" "$BUILDDIR/gcclib-pdp11.o"
++fi
++if [ ! -f "$LIBDIR/libcpdp11.a" ] || [ ! -f "$CRT0" ]; then
++    echo "Building pdp11 C library..."
++    (cd "$FUZIXDIR/Library" && make tools/syscall_pdp11)
++    (cd "$LIBDIR" && make -f Makefile.pdp11)
++fi
++
++# Helper: build a C program into a Fuzix binary
++build_util() {
++    local name="$1"
++    shift
++    local srcs="$@"
++    local objs=""
++    for src in $srcs; do
++        local base=$(basename "$src" .c)
++        $CC $CFLAGS -c "$src" -o "$BUILDDIR/$base.o"
++        objs="$objs $BUILDDIR/$base.o"
++    done
++    $LD $CRT0 $objs -o "$BUILDDIR/$name" $LDFLAGS
++    echo "  $name: $($SIZE "$BUILDDIR/$name" | tail -1 | awk '{print $4}') bytes"
++}
++
++# Helper: convert a.out to Fuzix binary format (via flat binary)
++make_fuz() {
++    $OBJCOPY -O binary "$BUILDDIR/$1" "$BUILDDIR/$1.bin"
++    python3 "$SCRIPTDIR/make_fuzix_bin.py" "$BUILDDIR/$1.bin" "$BUILDDIR/$1.fuz" 2000
++}
++
++# --- Build /init ---
++echo "Building init..."
++build_util init "$SCRIPTDIR/init.c"
++make_fuz init
++
++# --- Build userspace utilities ---
++echo "Building utilities..."
++for prog in ssh cat echo pwd mkdir rmdir chmod hi \
++            true false yes basename dirname sleep whoami uname printenv \
++            head tee wc tr rm kill id chown chgrp uniq more tail od \
++            dd df du mount umount sync remount uptime \
++            rx sx cksum \
++            cp grep sed sort ps free date touch cmp cut ed env stty sum \
++            tar which xargs seq cal factor killall mknod reboot setdate su \
++            passwd who write sync logname groups fgrep uud uue banner \
++            mkfifo; do
++    build_util $prog "$UTILDIR/$prog.c"
++    make_fuz $prog
++    EXTRA_BINS="$EXTRA_BINS $prog"
++done
++
++# --- V7 Bourne shell: pipes, redirection, scripts ---
++SHDIR="$FUZIXDIR/Applications/V7/cmd/sh"
++echo "Building sh (V7)..."
++build_util sh $(for f in args blok builtin cmd ctype error expand fault io \
++    macro main msg name print service setbrk stak string word xec glob; do
++    echo "$SHDIR/$f.c"; done)
++make_fuz sh
++EXTRA_BINS="$EXTRA_BINS sh"
++# Minimal ls (upstream ls.c is too large for 16KB)
++echo "Building ls (minimal)..."
++build_util ls "$UTILDIR/ls.c"
++make_fuz ls
++
++# --- Colossal Cave Adventure (needs the 48KB user space) ---
++# ~27KB binary (text+data) loading at 0x2000 — first program to need
++# the grown map.  The location/message text lives in advent.db,
++# generated by the HOST advgen tool; pdp11 is little-endian 16-bit so
++# no ENDIAN flag (-x is for the big-endian targets; the db uses only
++# uint16_t offsets, so PDP middle-endian never enters into it).
++# adventdb.c's big text block is #if 0'd — only the vocab table
++# compiles into the target binary.
++CAVEDIR="$FUZIXDIR/Applications/cave"
++echo "Building Colossal Cave..."
++build_util advent \
++    "$CAVEDIR/advent.c" "$CAVEDIR/adventdb.c" "$CAVEDIR/database.c" \
++    "$CAVEDIR/english.c" "$CAVEDIR/itverb.c" "$CAVEDIR/lib.c" \
++    "$CAVEDIR/saveadv.c" "$CAVEDIR/turn.c" "$CAVEDIR/verb.c" \
++    "$CAVEDIR/global.c"
++make_fuz advent
++cc "$CAVEDIR/advgen.c" -o "$BUILDDIR/advgen"
++"$BUILDDIR/advgen" > "$BUILDDIR/advent.db"
++echo "  advent.db: $(stat -c %s "$BUILDDIR/advent.db") bytes"
++
++# --- ubasic (integer BASIC, Alan Cox's ubasic fork) ---
++# Vendored in Applications/ubasic (see README.pdp11 there for
++# provenance).  ~17KB text+data at 0x2000 — needs the 48KB map like
++# advent.  _itoa/_uitoa come from libc xitoa.c; the interpreter is
++# stdio-free by upstream design.  Examples ride to /usr/lib/basic.
++UBASDIR="$FUZIXDIR/Applications/ubasic"
++echo "Building ubasic..."
++build_util ubasic \
++    "$UBASDIR/ubx.c" "$UBASDIR/ubasic.c" "$UBASDIR/tokenizer.c"
++make_fuz ubasic
++
++# --- sigtest (task #13: caught-signal trampoline validation) ---
++# Self-checking three-phase probe target; tb_sigprobe and the
++# silicon probe grep its needles.  Lives in the platform dir like
++# init.c — it validates this platform's delivery path.
++echo "Building sigtest..."
++build_util sigtest "$SCRIPTDIR/sigtest.c"
++make_fuz sigtest
++
++# --- levee (vi clone, task #16: first full-screen app) ---
++# ANSI variant (minicom is VT102).  screensz() came to libc with
++# this port -- levee called it but no Fuzix libc ever provided it.
++# 42456B total at 0x2000: the biggest binary on the image, ~6.6KB
++# of headroom below 0xE000 for stack.  4KB in-core edit buffer
++# (levee.h SIZE default).
++LEVDIR="$FUZIXDIR/Applications/levee"
++echo "Building levee..."
++SAVED_CFLAGS="$CFLAGS"
++CFLAGS="$CFLAGS -DVT52=0 -DANSI=1"
++build_util levee \
++    "$LEVDIR/beep.c" "$LEVDIR/blockio.c" "$LEVDIR/display.c" \
++    "$LEVDIR/doscall.c" "$LEVDIR/editcor.c" "$LEVDIR/exec.c" \
++    "$LEVDIR/find.c" "$LEVDIR/flexcall.c" "$LEVDIR/gemcall.c" \
++    "$LEVDIR/globals.c" "$LEVDIR/insert.c" "$LEVDIR/main.c" \
++    "$LEVDIR/misc.c" "$LEVDIR/modify.c" "$LEVDIR/move.c" \
++    "$LEVDIR/rmxcall.c" "$LEVDIR/ucsd.c" "$LEVDIR/undo.c" \
++    "$LEVDIR/unixcall.c" "$LEVDIR/wildargs.c"
++CFLAGS="$SAVED_CFLAGS"
++make_fuz levee
++
++# --- Assemble bootloader ---
++echo "Assembling bootloader..."
++PDP11_ASM="${PDP11_ASM:-pdp11_asm.py}"
++$PDP11_ASM "$SCRIPTDIR/boot_fuzix.s" -o "$SCRIPTDIR/boot_fuzix.hex"
++
++# --- Kernel size check ---
++KERN_SIZE=$(stat -c %s "$KERNBIN")
++KERN_SECTORS=$(( (KERN_SIZE + SECTOR_SIZE - 1) / SECTOR_SIZE ))
++echo "Kernel: $KERN_SIZE bytes ($KERN_SECTORS RL02 sectors)"
++
++if [ "$KERN_SECTORS" -gt "$KERN_RESERVED" ]; then
++    echo "ERROR: Kernel too large ($KERN_SECTORS > $KERN_RESERVED sectors)"
++    exit 1
++fi
++
++# --- Update bootloader sector count ---
++# The bootloader has KERN_NSECT as a constant. Verify it matches.
++echo "  (bootloader loads $KERN_SECTORS sectors from sector $KERN_START)"
++
++# --- Create raw RL02 image (256-byte sectors, SIMH format) ---
++echo ""
++echo "Creating raw RL02 image..."
++dd if=/dev/zero of="$RAW_IMG" bs=$SECTOR_SIZE count=$TOTAL_SECTORS status=none
++
++# Write boot block (sectors 0-3, 1024 bytes)
++# Convert assembler hex output to binary
++python3 -c "
++import sys
++lines = open('$SCRIPTDIR/boot_fuzix.hex').readlines()
++out = bytearray()
++for line in lines:
++    s = line.strip()
++    if s:
++        out.append(int(s, 16))
++# Pad to boot block size (4 sectors × 256 bytes = 1024)
++while len(out) < $((BOOT_SECTORS * SECTOR_SIZE)):
++    out.append(0)
++sys.stdout.buffer.write(out[:$((BOOT_SECTORS * SECTOR_SIZE))])
++" | dd of="$RAW_IMG" bs=$SECTOR_SIZE seek=$BOOT_START conv=notrunc status=none
++
++# Write kernel at sector 4
++echo "Writing kernel at sector $KERN_START..."
++dd if="$KERNBIN" of="$RAW_IMG" bs=$SECTOR_SIZE seek=$KERN_START conv=notrunc status=none
++
++# --- Create root filesystem ---
++echo "Creating root filesystem ($FS_BLOCKS Fuzix blocks, $FS_INODES inode blocks)..."
++$TOOLDIR/mkfs "$FSIMG" $FS_INODES $FS_BLOCKS
++
++# Populate with minimal device nodes and directories
++echo "Populating filesystem..."
++# --- Root /etc files ---
++# Static: the root fs is mounted ro, so mount can never rewrite mtab;
++# a canned copy describing the root mount is exactly right.  passwd
++# gives whoami/getpwuid something to answer with; liberror.txt gives
++# strerror its message table.
++cat > "$BUILDDIR/passwd" <<'PWEOF'
++root::0:0:root:/:/bin/sh
++PWEOF
++cat > "$BUILDDIR/group" <<'GREOF'
++root::0:
++GREOF
++cat > "$BUILDDIR/mtab" <<'MTEOF'
++/dev/hd0 / fuzix ro 0 0
++MTEOF
++
++# ucp mknod syntax: mknod <name> <octal_mode> <dev_number>
++#   mode: 020666 = char dev rw-rw-rw-, 060660 = block dev rw-rw----
++#   dev_number: (major << 8) | minor
++#   dev_tab: major 0 = RL02 disk, major 2 = tty, major 4 = sys
++$TOOLDIR/ucp "$FSIMG" <<UCPEOF
++mkdir dev
++chmod 755 dev
++cd /dev
++mknod tty0 020666 512
++mknod tty1 020666 513
++mknod tty2 020666 514
++mknod console 020666 513
++mknod null 020666 1024
++mknod zero 020666 1029
++mknod proc 020666 1025
++mknod hd0 060660 0
++mknod hd1 060660 1
++cd /
++mkdir tmp
++mkdir home
++chmod 1777 tmp
++mkdir bin
++chmod 755 bin
++mkdir etc
++chmod 755 etc
++mkdir usr
++chmod 755 usr
++cd /
++bget $BUILDDIR/init.fuz init
++chmod 755 init
++cd /bin
++bget $BUILDDIR/ssh.fuz ssh
++chmod 755 ssh
++bget $BUILDDIR/cat.fuz cat
++chmod 755 cat
++bget $BUILDDIR/echo.fuz echo
++chmod 755 echo
++bget $BUILDDIR/pwd.fuz pwd
++chmod 755 pwd
++bget $BUILDDIR/mkdir.fuz mkdir
++chmod 755 mkdir
++bget $BUILDDIR/rmdir.fuz rmdir
++chmod 755 rmdir
++bget $BUILDDIR/chmod.fuz chmod
++chmod 755 chmod
++bget $BUILDDIR/hi.fuz hi
++chmod 755 hi
++bget $BUILDDIR/ls.fuz ls
++chmod 755 ls
++bget $BUILDDIR/true.fuz true
++chmod 755 true
++bget $BUILDDIR/false.fuz false
++chmod 755 false
++bget $BUILDDIR/yes.fuz yes
++chmod 755 yes
++bget $BUILDDIR/basename.fuz basename
++chmod 755 basename
++bget $BUILDDIR/dirname.fuz dirname
++chmod 755 dirname
++bget $BUILDDIR/sleep.fuz sleep
++chmod 755 sleep
++bget $BUILDDIR/whoami.fuz whoami
++chmod 755 whoami
++bget $BUILDDIR/uname.fuz uname
++chmod 755 uname
++bget $BUILDDIR/printenv.fuz printenv
++chmod 755 printenv
++bget $BUILDDIR/head.fuz head
++chmod 755 head
++bget $BUILDDIR/tee.fuz tee
++chmod 755 tee
++bget $BUILDDIR/wc.fuz wc
++chmod 755 wc
++bget $BUILDDIR/tr.fuz tr
++chmod 755 tr
++bget $BUILDDIR/rm.fuz rm
++chmod 755 rm
++bget $BUILDDIR/kill.fuz kill
++chmod 755 kill
++bget $BUILDDIR/id.fuz id
++chmod 755 id
++bget $BUILDDIR/chown.fuz chown
++chmod 755 chown
++bget $BUILDDIR/chgrp.fuz chgrp
++chmod 755 chgrp
++bget $BUILDDIR/uniq.fuz uniq
++chmod 755 uniq
++bget $BUILDDIR/more.fuz more
++chmod 755 more
++bget $BUILDDIR/tail.fuz tail
++chmod 755 tail
++bget $BUILDDIR/od.fuz od
++chmod 755 od
++bget $BUILDDIR/dd.fuz dd
++chmod 755 dd
++bget $BUILDDIR/df.fuz df
++chmod 755 df
++bget $BUILDDIR/du.fuz du
++chmod 755 du
++bget $BUILDDIR/mount.fuz mount
++chmod 755 mount
++bget $BUILDDIR/umount.fuz umount
++chmod 755 umount
++bget $BUILDDIR/sync.fuz sync
++chmod 755 sync
++bget $BUILDDIR/remount.fuz remount
++chmod 755 remount
++bget $BUILDDIR/uptime.fuz uptime
++chmod 755 uptime
++bget $BUILDDIR/rx.fuz rx
++chmod 755 rx
++bget $BUILDDIR/sx.fuz sx
++chmod 755 sx
++bget $BUILDDIR/cksum.fuz cksum
++chmod 755 cksum
++bget $BUILDDIR/ubasic.fuz ubasic
++chmod 755 ubasic
++bget $BUILDDIR/sigtest.fuz sigtest
++chmod 755 sigtest
++bget $BUILDDIR/levee.fuz levee
++chmod 755 levee
++$(for b in $EXTRA_BINS; do echo "bget $BUILDDIR/$b.fuz $b"; echo "chmod 755 $b"; done)
++ln cp mv
++ln cp ln
++cd /etc
++bget $BUILDDIR/passwd passwd
++chmod 644 passwd
++bget $BUILDDIR/group group
++chmod 644 group
++bget $BUILDDIR/mtab mtab
++chmod 644 mtab
++cd /usr
++mkdir lib
++chmod 755 lib
++cd /usr/lib
++bget $LIBDIR/liberror.txt liberror.txt
++chmod 644 liberror.txt
++mkdir basic
++chmod 755 basic
++cd /usr/lib/basic
++bget $UBASDIR/examples/demo.bas demo.bas
++chmod 644 demo.bas
++bget $UBASDIR/examples/fib.bas fib.bas
++chmod 644 fib.bas
++cd /usr
++mkdir games
++chmod 755 games
++cd /usr/games
++bget $BUILDDIR/advent.fuz advent
++chmod 755 advent
++mkdir lib
++chmod 755 lib
++cd /usr/games/lib
++bget $BUILDDIR/advent.db advent.db
++chmod 644 advent.db
++exit
++UCPEOF
++
++# Verify filesystem (before endian conversion, while still x86 LE)
++echo "Checking filesystem..."
++$TOOLDIR/fsck -y "$FSIMG" 2>&1 || true
++
++# Convert 32-bit fields from x86 LE to PDP-endian (word-swapped)
++echo "Converting 32-bit fields to PDP-endian..."
++python3 "$SCRIPTDIR/pdp11_endian_fix.py" "$FSIMG"
++
++# Write filesystem into raw image at FS_START
++# mkfs produces 512-byte Fuzix blocks; we need to split into 256-byte RL02 sectors
++echo "Writing filesystem at sector $FS_START..."
++dd if="$FSIMG" of="$RAW_IMG" bs=$SECTOR_SIZE seek=$FS_START conv=notrunc status=none
++
++# --- Create expanded SD image (512-byte sectors, 256 data + 256 × 0xFF) ---
++echo ""
++echo "Creating expanded SD image (0xFF padded)..."
++python3 -c "
++import sys
++data = open('$RAW_IMG', 'rb').read()
++sector_size = 256
++pad = b'\xff' * 256
++out = bytearray()
++for i in range(0, len(data), sector_size):
++    sector = data[i:i+sector_size]
++    out.extend(sector)
++    out.extend(pad)
++sys.stdout.buffer.write(out)
++" > "$SD_IMG"
++
++# --- Clean up temp files ---
++rm -f "$SCRIPTDIR/boot_fuzix.hex"
++rm -rf "$BUILDDIR"
++# Keep $FSIMG for ucp access (ucp can't handle partitioned images)
++
++# --- Summary ---
++echo ""
++echo "=== Done ==="
++echo "  Raw (SIMH):  $RAW_IMG  ($(stat -c %s "$RAW_IMG") bytes)"
++echo "  SD card:     $SD_IMG  ($(stat -c %s "$SD_IMG") bytes)"
++echo ""
++echo "  Boot:        sectors 0-3"
++echo "  Kernel:      sectors $KERN_START-$((KERN_START + KERN_SECTORS - 1)) ($KERN_SIZE bytes)"
++echo "  Filesystem:  sectors $FS_START-$((FS_START + FS_SECTORS - 1)) ($FS_BLOCKS Fuzix blocks)"
++echo "  Swap:        sectors $SWAP_START-$((SWAP_START + SWAP_SECTORS - 1))"
++echo ""
++echo "  SIMH:    pdp11> attach rl0 $RAW_IMG"
++echo "  SD card: dd if=$SD_IMG of=/dev/sdX bs=512"
++echo ""
++echo "  Utilities:   ssh cat echo pwd mkdir rmdir chmod hi ls"
++echo "               true false yes basename dirname sleep whoami uname printenv"
++echo "               head tee wc tr rm kill id chown chgrp uniq more tail od"
++echo "               dd df du mount umount"
++echo "  Games:       /usr/games/advent (Colossal Cave, db in /usr/games/lib)"
++echo "  BASIC:       /bin/ubasic (examples in /usr/lib/basic: demo.bas fib.bas)"
++echo ""
++echo "  To add more binaries, use ucp on the filesystem image:"
++echo "    $TOOLDIR/ucp $FSIMG"
++echo "  Then re-run this script to rebuild the disk images."
+diff --git a/Kernel/platform/platform-pdp11dec/config.h b/Kernel/platform/platform-pdp11dec/config.h
+new file mode 100644
+index 000000000..ce27e607f
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/config.h
+@@ -0,0 +1,74 @@
++/* Enable to make ^Z dump the inode table for debug */
++#undef CONFIG_IDUMP
++/* Enable to make ^A drop back into the monitor */
++#undef CONFIG_MONITOR
++/* Profil syscall support (not yet complete) */
++#undef CONFIG_PROFIL
++
++#define CONFIG_SMALL
++#define ALIGNUP(v) (((v) + 1) & ~1)
++
++#define CONFIG_MULTI
++/*
++ * PDP-11 with a DEC MMU (11/23, 11/23+, 11/34, 11/40, 11/73 ...), 18 bit
++ * addressing, up to 248 KB of memory.
++ *
++ * Kernel virtual = physical 0x0000-0xBFFF (pages 0-5, 48 KB).
++ * Kernel page 6 (VA 0xC000) is a movable window (KIPAR6) onto other
++ * physical memory: process udata stashes, fork copies, Ethernet buffers.
++ * Kernel page 7 is the I/O page.
++ *
++ * User processes live in fixed 44 KB banks from physical 0xC000 up, as
++ * many as fit (bank_click[] in main.c, sized at boot): with 248 KB that is
++ * four banks, 0xC000-0x37FFF, and 24 KB above them for the Ethernet
++ * buffers.  Each bank holds the 512 byte udata stash at offset 0 and the
++ * user image (VA 0x2000-0xCDFF) above it.  More processes swap to the
++ * swap area of the RL02.
++ *
++ * The kernel reaches the current process's memory with MFPI/MTPI.
++ */
++#define CONFIG_BANK_FIXED
++#define MAX_MAPS	4
++#define MAP_SIZE	0xAE00U			/* user span per bank */
++#define CONFIG_PARENT_FIRST
++#define CONFIG_BANKS 	1
++#define PROC_SIZE	88			/* 44K bank, 88 * 512 */
++
++#define BANK_CLICKS	0x2C0		/* 44 KB in 64 byte clicks */
++#define BANK0_CLICK	0x300		/* first bank at physical 0xC000 */
++
++#define PTABSIZE	12
++#define ITABSIZE	24	/* In-core inodes */
++#define OFTSIZE		20	/* Open file table */
++
++#define PROGBASE	0x2000UL
++#define PROGLOAD	PROGBASE
++#define PROGTOP		0xCE00UL
++/* The swap image is the whole bank: stash (512B below PROGBASE, its
++   "VA" is 0x1E00) + user span.  (0xCE00-0x1E00)/512 = 88 exactly. */
++#define SWAP_SIZE	88
++#define SWAPBASE	0x1E00UL
++#define SWAPTOP		0xCE00UL
++#define MAX_SWAPS	PTABSIZE
++#define swap_map(x)	((uint8_t *)(x))
++
++#define SWAPDEV		(1)
++
++#define TICKSPERSEC 60   /* Ticks per second — KW11-L line clock */
++
++#define BOOT_TTY (512 + 1)   /* Set this to default device for stdio, stderr */
++                          /* In this case, the default is the first TTY device */
++                            /* Temp FIXME set to serial port for debug ease */
++
++/* We need a tidier way to do this from the loader */
++#define BOOTDEVICE 0x0000 /* Root fs = RL02 minor 0 */
++#define BOOTPARAM "rw"   /* mount root read-write; remount / ro before power-off writes the clean mark */
++#define CMDLINE	NULL	  /* Location of root dev name */
++
++/* Device parameters */
++#define NUM_DEV_TTY 2
++#define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */
++#define NBUFS    4        /* Number of block buffers */
++#define NMOUNTS	 1	  /* Number of mounts at a time */
++
++#define plt_copyright() kprintf("PDP-11 updates (c) 2026 Stensat Group LLC in association with Claude Opus 4.6/4.8, and Fable 5\n")
+diff --git a/Kernel/platform/platform-pdp11dec/crt0.S b/Kernel/platform/platform-pdp11dec/crt0.S
+new file mode 100644
+index 000000000..0d3a2f0b8
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/crt0.S
+@@ -0,0 +1,18 @@
++
++		.globl __end
++		.globl __bss_start
++
++_start:
++		bis $0340,*$0177776	/* IRQs off */
++		mov $_udata+512,sp	/* Set kernel stack */
++		mov $__bss_start,r0
++1:					/* Wipe BSS */
++		clr (r0)+
++		cmp r0,$__end
++		blo 1b			/* unsigned: the kernel crosses 0x8000 */
++		jsr pc,init_early
++		jsr pc,init_hardware
++		jsr pc,_fuzix_main
++		bis $0340,*$0177776
++2:
++		jmp 2b
+diff --git a/Kernel/platform/platform-pdp11dec/dev_rl.c b/Kernel/platform/platform-pdp11dec/dev_rl.c
+new file mode 100644
+index 000000000..9a0364601
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/dev_rl.c
+@@ -0,0 +1,268 @@
++/*
++ * RL11/RL02 disk driver for Fuzix
++ *
++ * Single-drive RL02 on STENSAT FPGA PDP-11/20.
++ * RL02 geometry: 512 cylinders, 2 heads, 40 sectors/track, 256 bytes/sector.
++ * Each RL02 sector = 256 bytes = 128 words.
++ * Fuzix block = 512 bytes = 2 RL02 sectors.
++ *
++ * Disk layout (in RL02 sectors of 256 bytes):
++ *   Sectors   0-3     Boot block (loaded by ROM to address 0)
++ *   Sectors   4-127   Kernel image (bootloader loads to 0x0200)
++ *   Sectors 128-16383 Root filesystem (minor 0)  ~8 MB
++ *   Sectors 16384-20479 Swap partition (minor 1) ~2 MB
++ *
++ * Since Fuzix blocks are 512 bytes and RL02 sectors are 256 bytes,
++ * each Fuzix block = 2 consecutive RL02 sectors.
++ *
++ * RL11 registers:
++ *   174400 RLCS  Control/Status
++ *   174402 RLBA  Bus Address
++ *   174404 RLDA  Disk Address {cylinder[15:7], head[6], sector[5:0]}
++ *   174406 RLMP  Word count (negative, two's complement)
++ */
++
++#include <kernel.h>
++#include <kdata.h>
++#include <printf.h>
++#include <dev_rl.h>
++
++/* RL11 register addresses */
++#define RLCS  (*(volatile uint16_t *)0174400)
++#define RLBA  (*(volatile uint16_t *)0174402)
++#define RLDA  (*(volatile uint16_t *)0174404)
++#define RLMP  (*(volatile uint16_t *)0174406)
++
++/* RLCS bits */
++#define RLCS_DRDY   0x0001   /* Drive ready */
++#define RLCS_FUNC   0x000E   /* Function code [3:1] */
++#define RLCS_GO     0x0001   /* GO bit (same position, sets with func) */
++#define RLCS_IE     0x0040   /* Interrupt enable */
++#define RLCS_CRDY   0x0080   /* Controller ready */
++#define RLCS_ERR    0x8000   /* Composite error */
++
++/* Function codes (shifted into bits [3:1]) */
++#define RL_NOP      (0 << 1)
++#define RL_WCHK     (1 << 1)
++#define RL_GETSTAT  (2 << 1)
++#define RL_SEEK     (3 << 1)
++#define RL_RDHDR    (4 << 1)
++#define RL_WRITE    (5 << 1)
++#define RL_READ     (6 << 1)
++#define RL_RDNOHDR  (7 << 1)
++
++/* Partition offsets in RL02 sectors (256 bytes each) */
++#define PART0_START  256     /* Root filesystem */
++#define PART0_SIZE   16128   /* Sectors 256-16383 */
++#define PART1_START  16384   /* Swap */
++#define PART1_SIZE   4096    /* Sectors 16384-20479 */
++
++/* Convert linear RL02 sector to RLDA value */
++static uint16_t sector_to_rlda(uint16_t linear)
++{
++    uint16_t sector = linear % 40;
++    uint16_t head = (linear / 40) % 2;
++    uint16_t cylinder = linear / 80;
++    return (cylinder << 7) | (head << 6) | sector;
++}
++
++/* Wait for controller ready */
++static void rl_wait(void)
++{
++    while (!(RLCS & RLCS_CRDY))
++        ;
++}
++
++/* Current cylinder tracking (avoids unnecessary seeks) */
++static uint16_t cur_cyl = 0xFFFF;  /* unknown */
++
++/* Seek to the cylinder containing an RL02 linear sector */
++static void rl_seek(uint16_t linear)
++{
++    uint16_t target_cyl = linear / 80;
++    int16_t diff;
++    uint16_t da;
++
++    if (target_cyl == cur_cyl)
++        return;
++
++    diff = target_cyl - cur_cyl;
++
++    /* Get Status to confirm drive is ready */
++    rl_wait();
++    RLDA = 0x04;   /* Get Status, reset errors */
++    RLCS = RL_GETSTAT | RLCS_GO;
++    rl_wait();
++
++    if (cur_cyl == 0xFFFF) {
++        /* Unknown position — Read Header to find current cylinder */
++        RLCS = RL_RDHDR | RLCS_GO;
++        rl_wait();
++        cur_cyl = (RLMP >> 7) & 0x1FF;
++        diff = target_cyl - cur_cyl;
++    }
++
++    if (diff == 0) {
++        cur_cyl = target_cyl;
++        return;
++    }
++
++    /* Build seek RLDA: {difference[15:7], 0, head_select[4], 0, direction[2], 0, 0} */
++    if (diff > 0) {
++        da = (diff << 7) | 0x04;   /* outward (away from cyl 0), bit 2=1 */
++    } else {
++        da = ((-diff) << 7);        /* inward (toward cyl 0), bit 2=0 */
++    }
++
++    rl_wait();
++    RLDA = da;
++    RLCS = RL_SEEK | RLCS_GO;
++    rl_wait();
++
++    cur_cyl = target_cyl;
++}
++
++/*
++ * Transfer one Fuzix block (512 bytes = 2 RL02 sectors).
++ * The RL11 DMA reads 256 bytes per sector, so we issue two
++ * consecutive sector reads/writes.
++ */
++static int rl_transfer(bool is_read, uint8_t minor, uint8_t rawflag)
++{
++    uint16_t ct = 0;
++    uint16_t part_start;
++    uint16_t part_size;
++    uint16_t cmd;
++    irqflags_t irq = 0;
++
++    /* Select partition */
++    if (minor == 0) {
++        part_start = PART0_START;
++        part_size = PART0_SIZE;
++    } else if (minor == 1) {
++        part_start = PART1_START;
++        part_size = PART1_SIZE;
++    } else {
++        udata.u_error = ENODEV;
++        return -1;
++    }
++
++    if (rawflag == 1) {
++        if (d_blkoff(9))
++            return -1;
++    }
++
++    cmd = is_read ? RL_READ : RL_WRITE;
++
++    /* A swap image transfer (rawflag 2) moves a whole bank — 44KB
++       of polled DMA — and the console is deaf for all of it if it
++       runs masked.  It touches only the target bank's pages (user
++       image + that process's udata STASH, which is a frozen copy —
++       never the live udata), and no interrupt handler references
++       either, so interrupts can stay live for the duration; the
++       swap callers hold priority 7 and get it back on the way
++       out. */
++    if (rawflag == 2) {
++        irq = __hard_di();	/* current PSW, to restore below */
++        __hard_ei();
++    }
++
++    while (ct < udata.u_nblock) {
++        /* Convert Fuzix block number to RL02 linear sector.
++         * Each Fuzix block = 2 RL02 sectors (512 / 256).
++         */
++        uint16_t rl_sector = part_start + (udata.u_block << 1);
++
++        /* Bounds check */
++        if ((udata.u_block << 1) + 2 > part_size) {
++            udata.u_error = EIO;
++            break;
++        }
++
++        /* Seek to the correct cylinder */
++        rl_seek(rl_sector);
++
++        /* User-space buffers live in a bank: 18 bit physical =
++         * bank_click[page] * 64 + 0x200 + (va - PROGBASE), i.e. bank
++         * base + (va - SWAPBASE).  Bits 15:0 go to RLBA, bits 17:16
++         * to RLCS bits 5:4.  Swap legs (rawflag 2) use the swapper's
++         * target bank (swappage, maybe not the running process); raw
++         * user I/O (rawflag 1) uses udata.u_page.  rawflag 0 is a
++         * kernel address (buffer cache), identity mapped. */
++        uint16_t bufva = (uint16_t)udata.u_dptr;
++        uint16_t lo, hi;
++        if (rawflag) {
++            uint16_t page = (rawflag == 2) ? swappage : udata.u_page;
++            uint16_t off = bufva - (uint16_t)SWAPBASE;
++            uint16_t click = bank_click[page] + (off >> 6);
++            lo = (click << 6) | (off & 63);
++            hi = click >> 10;
++        } else {
++            lo = bufva;
++            hi = 0;
++        }
++
++        /* First half: 128 words (256 bytes) */
++        rl_wait();
++        RLBA = lo;
++        RLDA = sector_to_rlda(rl_sector);
++        RLMP = (uint16_t)-128;  /* 128 words = 256 bytes */
++        RLCS = cmd | ((hi & 3) << 4) | RLCS_GO;
++
++        rl_wait();
++        if (RLCS & RLCS_ERR) {
++            kprintf("rl%d: err blk %d rlcs=%x\n",
++                    minor, udata.u_block, RLCS);
++            udata.u_error = EIO;
++            break;
++        }
++
++        /* Second half: next RL02 sector, next 256 bytes of buffer —
++         * recompute the 18-bit address (the +256 may carry). */
++        {
++            uint16_t lo2 = lo + 256;
++            uint16_t hi2 = hi + (lo2 < lo);
++            RLBA = lo2;
++            RLDA = sector_to_rlda(rl_sector + 1);
++            RLMP = (uint16_t)-128;
++            RLCS = cmd | ((hi2 & 3) << 4) | RLCS_GO;
++        }
++
++        rl_wait();
++        if (RLCS & RLCS_ERR) {
++            kprintf("rl%d: err blk %d rlcs=%o\n",
++                    minor, udata.u_block, RLCS);
++            udata.u_error = EIO;
++            break;
++        }
++
++        udata.u_block++;
++        udata.u_dptr += 512;
++        ct++;
++    }
++    if (rawflag == 2)
++        __hard_irqrestore(irq);
++    return ct << 9;
++}
++
++int rl_open(uint8_t minor, uint16_t flag)
++{
++    flag;
++    if (minor > 1) {
++        udata.u_error = ENODEV;
++        return -1;
++    }
++    return 0;
++}
++
++int rl_read(uint8_t minor, uint8_t rawflag, uint8_t flag)
++{
++    flag;
++    return rl_transfer(true, minor, rawflag);
++}
++
++int rl_write(uint8_t minor, uint8_t rawflag, uint8_t flag)
++{
++    flag;
++    return rl_transfer(false, minor, rawflag);
++}
+diff --git a/Kernel/platform/platform-pdp11dec/dev_rl.h b/Kernel/platform/platform-pdp11dec/dev_rl.h
+new file mode 100644
+index 000000000..1e5efaead
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/dev_rl.h
+@@ -0,0 +1,11 @@
++#ifndef __DEV_RL_DOT_H__
++#define __DEV_RL_DOT_H__
++
++int rl_open(uint8_t minor, uint16_t flag);
++int rl_read(uint8_t minor, uint8_t rawflag, uint8_t flag);
++int rl_write(uint8_t minor, uint8_t rawflag, uint8_t flag);
++
++/* Physical base of each user bank in 64 byte clicks (main.c) */
++extern uint16_t bank_click[];
++
++#endif
+diff --git a/Kernel/platform/platform-pdp11dec/device.h b/Kernel/platform/platform-pdp11dec/device.h
+new file mode 100644
+index 000000000..6f4c1e265
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/device.h
+@@ -0,0 +1,6 @@
++#ifndef __DEVICE_DOT_H__
++#define __DEVICE_DOT_H__
++
++extern void mod_control(uint8_t set, uint8_t clr);
++
++#endif /* __DEVICE_DOT_H__ */
+diff --git a/Kernel/platform/platform-pdp11dec/devices.c b/Kernel/platform/platform-pdp11dec/devices.c
+new file mode 100644
+index 000000000..5a2dc6ca1
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/devices.c
+@@ -0,0 +1,43 @@
++#include <kernel.h>
++#include <version.h>
++#include <kdata.h>
++#include <devsys.h>
++#include <tty.h>
++#include <vt.h>
++#include <dev_rl.h>
++#include <devtty.h>
++
++struct devsw dev_tab[] =  /* The device driver switch table */
++{
++// minor    open         close        read      write       ioctl
++// -----------------------------------------------------------------
++  /* 0: /dev/rl		RL02 disk: minor 0=root, minor 1=swap */
++  {  rl_open,       no_close,    rl_read,   rl_write,  no_ioctl },
++  /* 1: /dev/fd		(absent) */
++  {  nxio_open,     no_close,    no_rdwr,   no_rdwr,   no_ioctl },
++  /* 2: /dev/tty	TTY devices */
++  {  pdp_tty_open,     tty_close,   tty_read,  tty_write,  tty_ioctl },
++  /* 3: /dev/lpr	Printer devices */
++  {  no_open,     no_close,   no_rdwr,   no_rdwr,  no_ioctl  },
++  /* 4: /dev/mem etc	System devices (one offs) */
++  {  no_open,      no_close,    sys_read, sys_write, sys_ioctl  },
++  /* Pack to 7 with nxio if adding private devices and start at 8 */
++};
++
++bool validdev(uint16_t dev)
++{
++    /* This is a bit uglier than needed but the right hand side is
++       a constant this way */
++    if(dev > ((sizeof(dev_tab)/sizeof(struct devsw)) << 8) - 1)
++	return false;
++    else
++        return true;
++}
++
++void device_init(void)
++{
++  int i;
++
++  for (i = 1; i <= MAX_SWAPS; i++)
++    swapmap_init(i);
++}
+diff --git a/Kernel/platform/platform-pdp11dec/devtty.c b/Kernel/platform/platform-pdp11dec/devtty.c
+new file mode 100644
+index 000000000..24da46610
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/devtty.c
+@@ -0,0 +1,144 @@
++#include <kernel.h>
++#include <kdata.h>
++#include <printf.h>
++#include <stdbool.h>
++#include <devtty.h>
++#include <device.h>
++#include <tty.h>
++
++/* DL11 register layout: base+0 RCSR, +2 RBUF, +4 XCSR, +6 XBUF.
++   Minor 1 is the console SLU, minor 2 the second SLU. */
++static const uint16_t ttybase[NUM_DEV_TTY + 1] = {
++	0,
++	0177560,
++	0176500
++};
++
++/* Status registers are read as words to avoid the GCC pdp11 ASH
++   sign bug with byte shifts */
++#define RCSR(m)  (*(volatile uint16_t *)(ttybase[m]))
++#define RBUF(m)  (*(volatile uint8_t *)(ttybase[m] + 2))
++#define XCSR(m)  (*(volatile uint16_t *)(ttybase[m] + 4))
++#define XBUF(m)  (*(volatile uint8_t *)(ttybase[m] + 6))
++
++static unsigned char tbuf1[TTYSIZ];
++static unsigned char tbuf2[TTYSIZ];
++static uint8_t sleeping;
++
++/* Set by program_vectors: 1 if the second DL11 at 176500 answered */
++extern uint16_t tty2_present;
++/* Set by init_hardware: 1 if the KW11-L register at 177546 answered */
++extern uint16_t kw11_present;
++
++static int tty_absent(uint8_t minor)
++{
++	return minor == 2 && !tty2_present;
++}
++
++int pdp_tty_open(uint_fast8_t minor, uint16_t flag)
++{
++	if (tty_absent(minor)) {
++		udata.u_error = ENODEV;
++		return -1;
++	}
++	return tty_open(minor, flag);
++}
++
++tcflag_t termios_mask[NUM_DEV_TTY + 1] = {
++	0,
++	_CSYS,
++	_CSYS
++};
++
++struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
++	{NULL, NULL, NULL, 0, 0, 0},
++	{tbuf1, tbuf1, tbuf1, TTYSIZ, 0, TTYSIZ / 2},
++	{tbuf2, tbuf2, tbuf2, TTYSIZ, 0, TTYSIZ / 2},
++};
++
++/* Output for the system console (kprintf etc) */
++void kputchar(uint_fast8_t c)
++{
++	if (c == '\n')
++		tty_putc(1, '\r');
++	tty_putc(1, c);
++}
++
++ttyready_t tty_writeready(uint8_t minor)
++{
++	if (tty_absent(minor))
++		return TTY_READY_NOW;
++	if (XCSR(minor) & 0x80)
++		return TTY_READY_NOW;
++	return TTY_READY_SOON;
++}
++
++void tty_putc(uint8_t minor, unsigned char c)
++{
++	/* The DL11 is single-buffered: an XBUF write while a frame is
++	   shifting restarts the transmitter mid-frame.  The core skips
++	   its READY poll in interrupt context (the echo path), so the
++	   pacing has to live here.  READY clears in the same cycle as
++	   the XBUF write, so this spin is race-free. */
++	if (tty_absent(minor))
++		return;
++	while (!(XCSR(minor) & 0x80));
++	XBUF(minor) = c;
++}
++
++void tty_setup(uint_fast8_t minor, uint_fast8_t flags)
++{
++}
++
++int tty_carrier(uint8_t minor)
++{
++	return 1;
++}
++
++void tty_sleeping(uint8_t minor)
++{
++	sleeping |= 1 << minor;
++}
++
++void tty_data_consumed(uint8_t minor)
++{
++}
++
++/* RX interrupt entry (vectors 060/0300, BR4, shared stub in pdp11.S).
++   The trap_ctrl pending bit is edge-detected on IE&DONE, so a byte
++   arriving while DONE is still set makes no new edge — drain with a
++   loop.  A spurious re-entry just finds DONE clear and returns. */
++void tty_rx_interrupt(void)
++{
++	uint8_t minor;
++	for (minor = 1; minor <= NUM_DEV_TTY; minor++)
++		while (!tty_absent(minor) && (RCSR(minor) & 0x80))
++			tty_inproc(minor, RBUF(minor));
++}
++
++/* Run off the timer: TX wake only, RX is interrupt-driven */
++void tty_interrupt(void)
++{
++	uint8_t minor;
++	for (minor = 1; minor <= NUM_DEV_TTY; minor++) {
++		if (tty_absent(minor))
++			continue;
++		if ((sleeping & (1 << minor)) && (XCSR(minor) & 0x80)) {
++			tty_outproc(minor);
++			sleeping &= ~(1 << minor);
++		}
++	}
++}
++
++void plt_interrupt(void)
++{
++	/* Re-arm the KW11-L: writing the CSR clears the MONITOR bit
++	   (keeping IE).  The FPGA clock request is level ie&monitor
++	   with edge-detected pending in trap_ctrl — without this
++	   write the line never falls and only ONE clock interrupt
++	   is ever delivered. */
++	if (kw11_present)
++		*(volatile uint16_t *)0177546 = 0x40;
++	timer_interrupt();
++	tty_interrupt();
++}
+diff --git a/Kernel/platform/platform-pdp11dec/devtty.h b/Kernel/platform/platform-pdp11dec/devtty.h
+new file mode 100644
+index 000000000..3c1b69f68
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/devtty.h
+@@ -0,0 +1,11 @@
++#ifndef __DEVTTY_DOT_H__
++#define __DEVTTY_DOT_H__
++
++#define KEY_ROWS 8
++#define KEY_COLS 7
++extern uint8_t keymap[8];
++extern uint8_t keyboard[8][7];
++extern uint8_t shiftkeyboard[8][7];
++
++int pdp_tty_open(uint_fast8_t minor, uint16_t flag);
++#endif
+diff --git a/Kernel/platform/platform-pdp11dec/divmod.S b/Kernel/platform/platform-pdp11dec/divmod.S
+new file mode 100644
+index 000000000..213c23b20
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/divmod.S
+@@ -0,0 +1,70 @@
++/*
++ * Unsigned 16-bit division helpers for PDP-11 (no EIS)
++ * Required by GCC when no libgcc is available.
++ *
++ * Calling convention (pdp11-aout-gcc):
++ *   jsr pc,func  — pushes return addr
++ *   2(sp) = dividend, 4(sp) = divisor
++ *   Result in r0. r2-r5 callee-saved.
++ */
++
++	.text
++	.globl ___udivhi3
++	.globl ___umodhi3
++
++/*
++ * ___udivhi3: r0 = dividend / divisor
++ */
++___udivhi3:
++	mov r2,-(sp)		/* save r2 */
++	mov 4(sp),r0		/* dividend */
++	mov 6(sp),r1		/* divisor */
++	jsr pc,udiv16
++	/* r0 = quotient (already there) */
++	mov (sp)+,r2		/* restore r2 */
++	rts pc
++
++/*
++ * ___umodhi3: r0 = dividend % divisor
++ */
++___umodhi3:
++	mov r2,-(sp)		/* save r2 */
++	mov 4(sp),r0		/* dividend */
++	mov 6(sp),r1		/* divisor */
++	jsr pc,udiv16
++	mov r1,r0		/* remainder → r0 */
++	mov (sp)+,r2		/* restore r2 */
++	rts pc
++
++/*
++ * udiv16: unsigned 16-bit restoring division
++ *
++ * Input:  r0 = dividend, r1 = divisor
++ * Output: r0 = quotient, r1 = remainder
++ * Clobbers: r2
++ */
++udiv16:
++	tst r1
++	beq 9f			/* division by zero → return 0,0 */
++	mov r0,r2		/* r2 = dividend (shifted out) */
++	clr r0			/* r0 = remainder (built up) */
++	/* 16 iterations unrolled as a counted loop */
++	mov $16,-(sp)		/* loop counter */
++1:
++	asl r2			/* shift dividend left; MSB → C */
++	rol r0			/* shift carry into remainder */
++	cmp r0,r1		/* remainder >= divisor? (unsigned) */
++	blo 2f
++	sub r1,r0		/* remainder -= divisor */
++	inc r2			/* set quotient bit */
++2:
++	dec (sp)
++	bne 1b
++	tst (sp)+		/* pop counter */
++	mov r0,r1		/* r1 = remainder */
++	mov r2,r0		/* r0 = quotient */
++	rts pc
++9:
++	clr r0
++	clr r1
++	rts pc
+diff --git a/Kernel/platform/platform-pdp11dec/fuzix.export b/Kernel/platform/platform-pdp11dec/fuzix.export
+new file mode 100644
+index 000000000..e69de29bb
+diff --git a/Kernel/platform/platform-pdp11dec/fuzix.ld b/Kernel/platform/platform-pdp11dec/fuzix.ld
+new file mode 100644
+index 000000000..bf676c4fd
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/fuzix.ld
+@@ -0,0 +1,58 @@
++STARTUP(crt0.o)
++OUTPUT_ARCH(pdp11)
++
++SEARCH_DIR(.)
++
++MEMORY
++{
++  ram (rwx) : ORIGIN = 0x0200, LENGTH = 0xDC00
++}
++
++/*
++ * Kernel occupies virtual 0x0200 - 0xDDFF (max ~55KB)
++ * 0x0000-0x01FF: trap vectors (written at runtime)
++ * 0xE000-0xFFFF: I/O page (MMU page 7)
++ */
++SECTIONS
++{
++  .text :
++  {
++    CREATE_OBJECT_SYMBOLS
++    *(.text .text.*)
++
++    . = ALIGN(0x2);
++    *(.rodata .rodata.*)
++
++    . = ALIGN(0x2);
++    _etext = .;
++  } > ram
++
++  .data :
++  {
++    *(.got.plt) *(.got)
++    *(.shdata)
++    *(.data .data.*)
++    _edata = .;
++  } > ram
++
++  .bss :
++  {
++    . = ALIGN(0x2);
++    __bss_start = . ;
++    *(.shbss)
++    *(.bss .bss.*)
++    *(COMMON)
++    _end =  ALIGN (0x2);
++    __end = _end;
++  } > ram
++
++  .stab 0 (NOLOAD) :
++  {
++    *(.stab)
++  }
++
++  .stabstr 0 (NOLOAD) :
++  {
++    *(.stabstr)
++  }
++}
+diff --git a/Kernel/platform/platform-pdp11dec/fuzix_simh.ini b/Kernel/platform/platform-pdp11dec/fuzix_simh.ini
+new file mode 100644
+index 000000000..ea1b1c75a
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/fuzix_simh.ini
+@@ -0,0 +1,25 @@
++; SIMH pdp11 configuration for Fuzix RL02 boot
++;
++; Run from this directory after ./build_fuzix_disk.sh:
++;   pdp11 fuzix_simh.ini
++; then connect the console:
++;   telnet localhost 12345
++
++set cpu 11/40
++set cpu 128k
++; instruction history aids crash post-mortems (show cpu history)
++;set cpu history=500
++
++set rl0 rl02
++attach rl0 fuzix_rl02.dsk
++
++set console telnet=12345
++set console telnet=buffered
++
++; Second terminal (/dev/tty2): SIMH's DL11 multiplexer defaults to
++; the same CSR base (176500) the platform uses for minor 2.
++;set dli enabled
++;set dli lines=1
++;attach dli 12346
++
++boot rl0
+diff --git a/Kernel/platform/platform-pdp11dec/init.c b/Kernel/platform/platform-pdp11dec/init.c
+new file mode 100644
+index 000000000..e537623ac
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/init.c
+@@ -0,0 +1,102 @@
++/*
++ * Minimal /init for Fuzix PDP-11
++ *
++ * Spawns a shell on each serial terminal (tty1 = console DL11,
++ * tty2 = second DL11 at 0176500) and respawns whichever exits.
++ *
++ * No stdio, no inittab, no login — just get to shell prompts.
++ */
++
++#include <unistd.h>
++#include <fcntl.h>
++#include <sys/wait.h>
++#include <syscalls.h>	/* setpgrp */
++
++static const char *sh_argv[] = { "-sh", (void *)0 };
++static const char *sh_envp[] = { "PATH=/bin", "HOME=/", (void *)0 };
++static const char msg[] = "\r\n[init: shell exited, restarting]\r\n";
++
++static const char *ttydev[] = { "/dev/tty1", "/dev/tty2" };
++#define NTTY 2
++static int ttypid[NTTY];
++
++static void spawn(int t)
++{
++	int pid = fork();
++	if (pid == 0) {
++		/* child — become a session leader FIRST, then attach to
++		   this terminal and exec the shell.
++		   setpgrp() gives us our own process group and clears the
++		   controlling tty we inherited from init.  Without it the
++		   child keeps init's p_tty, so tty_open()'s "process has
++		   no ctty yet" guard fails and the terminal never gets a
++		   pgrp: sgrpsig() ignores pgrp 0, which made ^C on tty2 a
++		   silent no-op.  (tty1 appeared to work back then only
++		   because init's open of /dev/console had put ITS pgrp on
++		   the tty and the shells still inherited it — this very
++		   setpgrp() ended that accident and exposed the console
++		   swallow; see the O_NOCTTY note in main().)  With both
++		   fixes, each terminal carries its own foreground group,
++		   so ^C reaches that terminal's job and nothing else. */
++		setpgrp();
++		close(0);
++		close(1);
++		close(2);
++		open(ttydev[t], O_RDWR);	/* fd 0 = stdin */
++		dup(0);				/* fd 1 = stdout */
++		dup(0);				/* fd 2 = stderr */
++		execve("/bin/sh", (char **)sh_argv, (char **)sh_envp);
++		/* if exec fails, try the small shell */
++		sh_argv[0] = "-ssh";
++		execve("/bin/ssh", (char **)sh_argv, (char **)sh_envp);
++		write(1, "init: no shell\r\n", 16);
++		_exit(1);
++	}
++	ttypid[t] = pid;	/* -1 on fork failure: retried next wait */
++}
++
++int main(int argc, char **argv)
++{
++	int t, pid, status;
++
++	/* Open console for init's own fds (init starts with none).
++	   O_NOCTTY is load-bearing: without it this open claims the
++	   console as init's controlling tty and parks t_pgrp on
++	   init's process group.  tty_post() only assigns a pgrp to a
++	   tty whose pgrp is still 0, so the tty1 shell's own open
++	   could never take it back — every console ^C then signalled
++	   only init and the shell's job never saw SIGINT (silicon
++	   sigtty_probe 2026-07-23: tty2 ^C green, console ^C dead).
++	   Init only ever writes here; it has no business owning the
++	   terminal. */
++	close(0);
++	close(1);
++	close(2);
++	open("/dev/console", O_RDWR | O_NOCTTY);	/* fd 0 = stdin */
++	dup(0);				/* fd 1 = stdout */
++	dup(0);				/* fd 2 = stderr */
++
++	/* A terminal that cannot be opened (no second DL11) is
++	   marked -2 and never gets a shell. */
++	for (t = 0; t < NTTY; t++) {
++		int fd = open(ttydev[t], O_RDWR | O_NOCTTY);
++		ttypid[t] = fd < 0 ? -2 : -1;
++		if (fd >= 0)
++			close(fd);
++	}
++
++	for (;;) {
++		for (t = 0; t < NTTY; t++)
++			if (ttypid[t] == -1)
++				spawn(t);
++		pid = wait(&status);
++		if (pid < 0)
++			continue;
++		for (t = 0; t < NTTY; t++)
++			if (ttypid[t] == pid) {
++				ttypid[t] = -1;
++				if (t == 0)
++					write(1, msg, sizeof(msg) - 1);
++			}
++	}
++}
+diff --git a/Kernel/platform/platform-pdp11dec/libc.c b/Kernel/platform/platform-pdp11dec/libc.c
+new file mode 100644
+index 000000000..34c1d84d4
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/libc.c
+@@ -0,0 +1,40 @@
++#include "kernel.h"
++
++void *memcpy(void *d, const void *s, size_t sz)
++{
++  unsigned char *dp = d;
++  const unsigned char *sp = s;
++  while(sz--)
++    *dp++=*sp++;
++  return d;
++}
++
++void *memset(void *d, int c, size_t sz)
++{
++  unsigned char *p = d;
++  while(sz--)
++    *p++ = c;
++  return d;
++}
++
++size_t strlen(const char *p)
++{
++  const char *e = p;
++  while(*e++);
++  return e-p-1;
++}
++
++int memcmp(const void *a, const void *b, size_t n)
++{
++  const uint8_t *ap = a;
++  const uint8_t *bp = b;
++  while(n--) {
++    if (*ap < *bp)
++      return -1;
++    if (*ap != *bp)
++      return 1;
++    ap++;
++    bp++;
++  }
++  return 0;
++}
+diff --git a/Kernel/platform/platform-pdp11dec/main.c b/Kernel/platform/platform-pdp11dec/main.c
+new file mode 100644
+index 000000000..1bf9d711d
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/main.c
+@@ -0,0 +1,172 @@
++#include <kernel.h>
++#include <timer.h>
++#include <kdata.h>
++#include <printf.h>
++#include <devtty.h>
++#include <buddy.h>
++
++void plt_idle(void)
++{
++	/* The idle loop can be reached at high IPL (e.g. preemption
++	   from the clock ISR); WAIT with interrupts masked never
++	   wakes.  Drop to priority 0 before waiting. */
++	__asm("bic $0340,*$0177776");
++	__asm("wait");
++}
++
++void do_beep(void)
++{
++}
++
++/* map_init is in pdp11.S */
++
++/* bankfixed pagemap_prepare sizes size-less binaries from ramtop */
++uaddr_t ramtop = PROGTOP;
++uint8_t need_resched;
++
++/*
++ * Memory: user banks of BANK_CLICKS from BANK0_CLICK up, as many as
++ * fit below the top of memory (see config.h).  bank_click[n] is the
++ * physical base of bank n in 64 byte clicks; bank 0 is "swapped".
++ * What is left above the last bank is for the Ethernet buffers.
++ */
++uint16_t bank_click[MAX_MAPS + 1];
++uint16_t mem_top_click;		/* first missing click */
++uint16_t free_click;		/* first click above the banks */
++
++extern uint16_t phys_present(uint16_t click);
++
++void pagemap_init(void)
++{
++	uint16_t c;
++	uint8_t n;
++
++	/* Find the top of memory in 8 KB steps; the I/O page at
++	   0x3E000 ends it on an 18 bit machine. */
++	for (c = 0x300; c < 0xF80; c += 0x80)
++		if (!phys_present(c))
++			break;
++	mem_top_click = c;
++	ramsize = c >> 4;
++	for (n = 1; n <= MAX_MAPS; n++) {
++		c = BANK0_CLICK + (n - 1) * BANK_CLICKS;
++		if (c + BANK_CLICKS > mem_top_click)
++			break;
++		bank_click[n] = c;
++		pagemap_add(n);
++	}
++	free_click = BANK0_CLICK + (n - 1) * BANK_CLICKS;
++	procmem = (n - 1) * (BANK_CLICKS >> 4);
++}
++
++uint8_t plt_param(char *p)
++{
++	return 0;
++}
++
++void plt_discard(void)
++{
++}
++
++void memzero(void *p, usize_t len)
++{
++	memset(p, 0, len);
++}
++
++/* User-mode MMU abort (from trap_mmu in pdp11.S): signal the
++   process and clear the latched SR0 error flags so translation
++   carries on.  chksigs applies the default disposition — for an
++   uncaught SIGSEGV that is doexit, which never returns here.  A
++   CAUGHT SIGSEGV is staged in u_cursig and delivered by trap_mmu's
++   return hook (otherwise the process would refault forever). */
++void plt_usermmu(void)
++{
++	*(volatile uint16_t *)0177572 = 1;	/* SR0: enable, clear errors */
++	ssig(udata.u_ptab, SIGSEGV);
++	chksigs();
++}
++
++/* Other traps in user mode (pdp11.S trap_maybe_user), by vector */
++void plt_usertrap(uint16_t vec)
++{
++	uint8_t sig;
++	switch (vec) {
++	case 004: sig = SIGBUS; break;
++	case 010: sig = SIGILL; break;
++	case 014: sig = SIGTRAP; break;
++	case 020: sig = SIGIOT; break;
++	default:  sig = SIGSYS; break;	/* EMT */
++	}
++	ssig(udata.u_ptab, sig);
++	chksigs();
++}
++
++/*
++ * Caught-signal delivery — the kernel half of the trampoline
++ * (task #13, 2026jul22_sigtramp.md).
++ *
++ * chksigs() stages a caught signal in udata.u_cursig; the asm
++ * return-to-user hooks in pdp11.S call this when it is nonzero.
++ * We build a six-word frame on the user stack and enter the
++ * handler directly: it sees a textbook C call with the signal
++ * number at 2(sp) and a return address pointing at the crt0
++ * __sigreturn stub, whose address the binary publishes at
++ * u_codebase+16 (the exec.h a_sigvec slot).  The stub drops the
++ * argument, restores r0/r1 and rtt's back into the interrupted
++ * code — bit-exact, condition codes included.  r2-r5 need no
++ * saving: gcc-pdp11 treats them as callee-saved, so any
++ * ABI-compliant handler preserves them itself.
++ *
++ * upc/upsw are the interrupted user PC/PSW from the trap frame;
++ * ur0/ur1 are the r0/r1 the interrupted code will see on resume —
++ * at syscall exit that is u_retval/u_error, so an interrupted
++ * read()'s -1/EINTR survives the handler.
++ *
++ * Returns the handler address (the caller redirects the frame PC)
++ * or 0 if there is nothing to run after all.  Kill paths never
++ * return.
++ */
++extern uint16_t get_usp(void);
++extern void set_usp(uint16_t);
++
++uint16_t sig_deliver(uint16_t upc, uint16_t upsw, uint16_t ur0, uint16_t ur1)
++{
++	uint_fast8_t sig = udata.u_cursig;
++	int (**svec)(int) = &udata.u_sigvec[sig];
++	int (*vec)(int) = *svec;
++	uint16_t tramp, usp;
++	uint16_t frame[6];
++
++	udata.u_cursig = 0;
++	if (!sig)
++		return 0;
++	*svec = SIG_DFL;	/* V7 semantics: reset before entry */
++	if (vec == SIG_IGN)	/* disposition raced away: nothing to do */
++		return 0;
++	if (vec == SIG_DFL)
++		doexit(dump_core(sig));
++
++	/* An old entry-16 binary has __start2 CODE at codebase+16
++	   instead of the stub pointer; its first word (a jsr opcode)
++	   sits far below PROGBASE, so the range guard turns a caught
++	   signal into a clean default-action death rather than a
++	   jump into hyperspace. */
++	tramp = ugetw((void *)(udata.u_codebase + 16));
++	if (tramp < PROGBASE || tramp >= (uint16_t)udata.u_top)
++		doexit(dump_core(sig));
++
++	frame[0] = tramp;		/* handler's return address */
++	frame[1] = sig;			/* handler's argument */
++	frame[2] = ur1;
++	frame[3] = ur0;
++	frame[4] = upc;			/* rtt pops these two */
++	frame[5] = upsw;
++	usp = get_usp() - 12;
++	/* uput windows through KIPAR5 and validates the range; a
++	   trashed user SP fails validation and the process dies here
++	   rather than scribbling on the other bank. */
++	if (uput(frame, (void *)usp, 12))
++		doexit(dump_core(SIGKILL));
++	set_usp(usp);
++	return (uint16_t)(arg_t)vec;
++}
+diff --git a/Kernel/platform/platform-pdp11dec/make_fuzix_bin.py b/Kernel/platform/platform-pdp11dec/make_fuzix_bin.py
+new file mode 100644
+index 000000000..725571260
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/make_fuzix_bin.py
+@@ -0,0 +1,81 @@
++#!/usr/bin/env python3
++"""
++Convert a PDP-11 binary to Fuzix exec format.
++
++Input: a flat binary produced by objcopy -O binary, linked at PROGBASE.
++       The first 16 bytes are the crt0 FZX1 header (will be replaced).
++Output: Fuzix exec binary with 16-byte struct exec header replacing crt0 header.
++
++The kernel loads the binary starting at progload (= a_base << 8):
++  - Reads struct exec header (first 16 bytes), computes bin_size
++  - Overwrites bytes 0-15 at progload with sys_stubs
++  - Loads remaining bytes at progload+16: the a_sigvec word
++    (crt0's __sigreturn address, read at caught-signal delivery)
++    then code (crt0 __start2 entry at +18)
++  - doexec(progload + a_entry) starts execution
++
++Usage: make_fuzix_bin.py <input.bin> <output.fuz> [progbase_hex]
++"""
++import sys
++import struct
++
++if len(sys.argv) < 3:
++    print(f"Usage: {sys.argv[0]} <input.bin> <output.fuz> [progbase_hex]")
++    sys.exit(1)
++
++input_path = sys.argv[1]
++output_path = sys.argv[2]
++progbase = int(sys.argv[3], 16) if len(sys.argv) > 3 else 0xA000
++
++with open(input_path, 'rb') as f:
++    code = f.read()
++
++if len(code) < 16:
++    print(f"ERROR: Input too small ({len(code)} bytes, need at least 16)")
++    sys.exit(1)
++
++# The flat binary includes the 16-byte crt0 header at offset 0.
++# Replace it with the proper Fuzix struct exec header.
++# Total file size = len(code) (header + body, same size as input).
++total_size = len(code)
++
++# a_text = total file size (includes the 16-byte header).
++# The kernel does: bin_size = a_text + a_data - sizeof(struct exec)
++# So bin_size = total_size - 16 = the code bytes after the header.
++a_text = total_size
++
++# Minimum 64 bytes total (kernel rejects bin_size < 64)
++if a_text < 80:  # 80 because bin_size = a_text - 16 >= 64
++    pad = 80 - a_text
++    code += b'\x00' * pad
++    a_text = 80
++    total_size = len(code)
++    print(f"  Padded {pad} bytes to meet 64-byte minimum")
++
++# struct exec: magic(2), cpu(1), cpufeat(1), base(1), hints(1),
++#              text(2), data(2), bss(2), entry(1), size(1), stack(1), zp(1)
++header = struct.pack('<HBBBBHHHBBBB',
++    0x80A8,         # a_magic
++    7,              # a_cpu = A_PDP11
++    0,              # a_cpufeat
++    progbase >> 8,  # a_base (page number)
++    0,              # a_hints
++    a_text,         # a_text (total file size including header)
++    0,              # a_data
++    0,              # a_bss
++    18,             # a_entry: past header (16) AND the a_sigvec word
++                    # at offset 16 — crt0 publishes __sigreturn there
++                    # for caught-signal delivery (task #13)
++    0,              # a_size (all memory)
++    0,              # a_stack
++    0,              # a_zp
++)
++
++assert len(header) == 16
++
++with open(output_path, 'wb') as f:
++    f.write(header)
++    f.write(code[16:])  # skip crt0 header, replace with exec header
++
++print(f"Created {output_path}: {total_size - 16} bytes code, {total_size} bytes total")
++print(f"  PROGBASE=0x{progbase:04X}, a_text={a_text} (incl header), entry=PROGBASE+18 (sigvec word at +16)")
+diff --git a/Kernel/platform/platform-pdp11dec/pdp11.S b/Kernel/platform/platform-pdp11dec/pdp11.S
+new file mode 100644
+index 000000000..00b7b13f1
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/pdp11.S
+@@ -0,0 +1,623 @@
++#include "../../cpu-pdp11/kernel-pdp11.def"
++
++	.text
++	.globl _program_vectors
++	.globl _plt_monitor
++	.globl _plt_reboot
++	.globl outchar
++	.globl init_hardware
++	.globl init_early
++	.globl _map_init
++
++init_early:
++	rts pc
++
++_plt_monitor:
++_plt_reboot:
++	bis $0340,*$0177776	/* IRQ off */
++	jmp _plt_reboot
++
++	.bss
++	.even
++	.globl _udata
++
++_udata:
++	.= . + 512
++
++	.text
++
++/*
++ *	KL11 and equivalents
++ */
++
++outchar:
++	bitb $0x80,0177564		/* test bit 7 of TCSR (tx ready) */
++	beq outchar
++	mov r0,0177566
++	rts pc
++
++init_hardware:
++	/* KW11-L: enable interrupt, 60Hz line clock, vector 0100, BR6.
++	   An 11/23 without a KW11-L board has no register at 177546:
++	   its clock interrupt comes from the backplane (BEVENT) and
++	   cannot be switched off.  Probe, and remember the answer. */
++	mov *$4,-(sp)
++	mov *$6,-(sp)
++	mov $kw_nx,*$4
++	mov $0340,*$6
++	mov $1,_kw11_present
++	mov $0x40,*$0177546	/* bit 6 = interrupt enable */
++	mov (sp)+,*$6
++	mov (sp)+,*$4
++	/* DL11: polling mode (RX interrupt disabled until vectors ready) */
++	clr 0177560
++	rts pc
++
++kw_nx:
++	clr _kw11_present
++	rti
++
++	.globl _kw11_present
++	.data
++_kw11_present:	.word 0
++	.text
++
++/*
++ * map_init — set up the MMU (see config.h for the memory map).
++ *
++ * Kernel map (64KB virtual):
++ *   Page 0-5: 0x0000-0xBFFF  kernel code and data (identity map)
++ *   Page 6:   0xC000-0xDFFF  movable window (KIPAR6)
++ *   Page 7:   0xE000-0xFFFF  I/O page -> physical 0x3E000-0x3FFFF
++ *
++ * PAR value = physical_base / 64.  PDR 077406 = full 8 KB page, r/w.
++ * The user PARs are per process (program_user_map).
++ *
++ * MMU registers (I/O page addresses):
++ *   KIPDR0-7: 172300-172316    KIPAR0-7: 172340-172356
++ *   UIPDR0-7: 177600-177616    UIPAR0-7: 177640-177656
++ *   SR0:      177572
++ */
++_map_init:
++	/* ---- Kernel PARs (identity map) ---- */
++	clr 0172340			/* KIPAR0 = 0 (phys 0x0000) */
++	mov $0200,0172342		/* KIPAR1 = 128 (phys 0x2000) */
++	mov $0400,0172344		/* KIPAR2 = 256 (phys 0x4000) */
++	mov $0600,0172346		/* KIPAR3 = 384 (phys 0x6000) */
++	mov $01000,0172350		/* KIPAR4 = 512 (phys 0x8000) */
++	mov $01200,0172352		/* KIPAR5 = 640 (phys 0xA000) */
++	mov $01400,0172354		/* KIPAR6 = 768 (phys 0xC000) */
++	mov $07600,0172356		/* KIPAR7 = 3968 (phys 0x3E000 I/O page) */
++
++	/* ---- Kernel PDRs (full 8KB pages, read/write) ---- */
++	mov $077406,0172300		/* KIPDR0 = PLF=7F, ACF=6 (r/w) */
++	mov $077406,0172302		/* KIPDR1 */
++	mov $077406,0172304		/* KIPDR2 */
++	mov $077406,0172306		/* KIPDR3 */
++	mov $077406,0172310		/* KIPDR4 */
++	mov $077406,0172312		/* KIPDR5 */
++	mov $077406,0172314		/* KIPDR6 */
++	mov $077406,0172316		/* KIPDR7 */
++
++	/* ---- User PARs ----
++	 * Campaign B: the user map is PER-PROCESS.  VA 0x2000-0xCDFF
++	 * (43.5K) maps to the process's bank — bank 1 user area at
++	 * phys 0xA200, bank 2 at 0x15200 (offset 0x200 skips the
++	 * in-bank udata stash).  program_user_map (below) writes
++	 * UIPAR1-6 from udata.u_page at every switchin and doexec;
++	 * here they start clear (nothing user-mode runs before the
++	 * first doexec programs them). */
++	clr 0177640			/* UIPAR0 (NULL guard, no access) */
++	clr 0177642			/* UIPAR1-6: per-process, see */
++	clr 0177644			/*   program_user_map */
++	clr 0177646
++	clr 0177650
++	clr 0177652
++	clr 0177654
++	/* Page 7: no user I/O access */
++	clr 0177656			/* UIPAR7 */
++
++	/* ---- User PDRs ----
++	 * Constant for the slot geometry — only the PARs move between
++	 * banks.  Page 6 is length-limited to 56 blocks (VA 0xC000-
++	 * 0xCDFF): PLF=55 -> PDR 033406.  A user access above 0xCDFF
++	 * aborts on page length — that is the hardware wall between
++	 * the two resident banks. */
++	clr 0177600			/* UIPDR0 no access = NULL guard */
++	mov $077406,0177602		/* UIPDR1 rw, full 8K */
++	mov $077406,0177604		/* UIPDR2 rw */
++	mov $077406,0177606		/* UIPDR3 rw */
++	mov $077406,0177610		/* UIPDR4 rw */
++	mov $077406,0177612		/* UIPDR5 rw */
++	mov $033406,0177614		/* UIPDR6 rw, PLF=55 (43.5K top) */
++	/* Page 7: no access */
++	clr 0177616			/* UIPDR7 */
++
++	/* ---- Enable MMU ---- */
++	mov $1,0177572			/* SR0 bit 0 = enable */
++
++	rts pc
++
++/*
++ * program_user_map — write UIPAR1-6 for the current process's bank.
++ *
++ * VA 0x2000 is the bank base + 0x200 (above the udata stash):
++ * UIPAR n = bank_click[u_page] + 010 + (n-1)*0200.  Reads u_page
++ * every time (generic code changes it).  Clobbers r0.
++ */
++	.globl _program_user_map
++_program_user_map:
++	mov _udata+U_DATA__U_PAGE,r0
++	mov r0,_umap_page
++	asl r0
++	mov _bank_click(r0),r0
++	add $010,r0
++	mov r0,*$0177642	/* UIPAR1 */
++	add $0200,r0
++	mov r0,*$0177644	/* UIPAR2 */
++	add $0200,r0
++	mov r0,*$0177646	/* UIPAR3 */
++	add $0200,r0
++	mov r0,*$0177650	/* UIPAR4 */
++	add $0200,r0
++	mov r0,*$0177652	/* UIPAR5 */
++	add $0200,r0
++	mov r0,*$0177654	/* UIPAR6 */
++	rts pc
++
++/*
++ * program_vectors - write trap and interrupt vectors
++ *
++ * PDP-11 vector format: 2 words per vector
++ *   word 0 = new PC (handler address)
++ *   word 1 = new PSW (priority level)
++ *
++ * Called from the kernel during init. On entry, IRQs are disabled
++ * (PSW priority 7), so it's safe to write the vector table.
++ */
++_program_vectors:
++	/* Bus error / timeout — vector 004 */
++	mov $trap_bus, *$4
++	mov $0340, *$6
++
++	/* Illegal and reserved instruction — vector 010 */
++	mov $trap_ill, *$010
++	mov $0340, *$012
++
++	/* BPT — vector 014 */
++	mov $trap_bpt, *$014
++	mov $0340, *$016
++
++	/* IOT — vector 020 */
++	mov $trap_iot, *$020
++	mov $0340, *$022
++
++	/* Power fail — vector 024 */
++	mov $trap_pwr, *$024
++	mov $0340, *$026
++
++	/* EMT — vector 030 */
++	mov $trap_emt, *$030
++	mov $0340, *$032
++
++	/* TRAP — vector 034 — syscall entry */
++	mov $trap_syscall, *$034
++	mov $0340, *$036
++
++	/* KW11-L line clock — vector 0100, BR6 */
++	mov $interrupt_clock, *$0100
++	mov $0300, *$0102	/* PSW priority 6 */
++
++	/* RL11 — vector 0160 (not used, we poll, but catch stray) */
++	mov $interrupt_stray, *$0160
++	mov $0340, *$0162
++
++	/* MMU abort — vector 0250 */
++	mov $trap_mmu, *$0250
++	mov $0340, *$0252
++
++	/* DL11 console RX — vector 060, BR4.  PSW pri 4 so the
++	   KW11-L (BR6) can still nest during RX processing. */
++	mov $interrupt_tty, *$060
++	mov $0200, *$062
++
++	/* DL11 console TX — vector 064 (IE never set, catch stray) */
++	mov $interrupt_stray, *$064
++	mov $0200, *$066
++
++	/* DL11 tty2 RX — vector 0300, BR4 */
++	mov $interrupt_tty, *$0300
++	mov $0200, *$0302
++
++	/* DL11 tty2 TX — vector 0304 (IE never set, catch stray) */
++	mov $interrupt_stray, *$0304
++	mov $0200, *$0306
++
++	/* Vectors are live: enable both DL11 receiver interrupts.
++	   We are still at PSW pri 7 here, so nothing fires until the
++	   kernel drops priority. */
++	mov $0x40,0177560	/* console RCSR bit 6 = IE */
++
++	/* The second DL11 is optional: probe it with the bus error
++	   vector pointing at probe_nx, which clears _tty2_present. */
++	mov $probe_nx,*$4
++	mov $1,_tty2_present
++	mov $0x40,*$0176500	/* tty2 RCSR bit 6 = IE */
++	mov $trap_bus,*$4
++
++	rts pc
++
++probe_nx:
++	clr _tty2_present
++	rti
++
++	.globl _tty2_present
++	.globl _umap_page
++	.data
++_tty2_present:	.word 0
++_umap_page:	.word 0		/* bank the user map was loaded for */
++	.text
++
++/*
++ * Interrupt entry: KW11-L line clock (vector 0100)
++ *
++ * Hardware pushes PSW and PC. We save remaining registers,
++ * call plt_interrupt (C), restore and RTI.
++ */
++interrupt_clock:
++	mov r0,-(sp)
++	mov r1,-(sp)
++	mov r2,-(sp)
++	mov r3,-(sp)
++	mov r4,-(sp)
++	mov r5,-(sp)
++	incb _udata+U_DATA__U_ININTERRUPT
++	jsr pc,_plt_interrupt
++	decb _udata+U_DATA__U_ININTERRUPT
++
++	/* Preempt + spinner-signal hook (task #12).  Runs with the
++	   registers STILL SAVED (frame: r5..r0 at 0..10(sp), PC at
++	   12(sp), PSW at 14(sp)) so the signal-only leg can call C.
++	   Only user-mode returns are eligible: kernel returns cover
++	   the EIS emulator, syscall bodies and dofork's copy — none
++	   may be split. */
++	bit $0140000,14(sp)	/* returning to user mode? */
++	beq 8f
++	tstb _inswap		/* belt: never during swap I/O */
++	bne 8f
++	tstb _need_resched
++	bne 7f
++
++	/* No reschedule due — but a signal may be pending for the
++	   CURRENT process with nothing else runnable (probe run 1's
++	   Q4: need_resched only sets on slice expiry with company or
++	   on wakeups, so a solo spinner's ^C had no delivery
++	   vehicle).  PFL_CHKSIG (bit 0 of p_flags, ptab offset 1) is
++	   set by ssig; chksigs applies default dispositions right
++	   here (doexit never returns — frame abandoned, harmless)
++	   and stages caught ones for the next kernel exit. */
++	mov _udata,r0		/* u_ptab (offset 0) */
++	bitb $1,1(r0)		/* p_flags & PFL_CHKSIG */
++	beq 8f
++	jsr pc,_chksigs		/* regs are saved; C may clobber */
++
++	/* Caught-signal delivery (task #13): chksigs staged a caught
++	   signal in u_cursig — deliver on this tick, which is what
++	   gives a solo spinner's handler tick latency instead of
++	   next-syscall latency.  Frame: r5..r0 at 0..10(sp),
++	   PC 12(sp), PSW 14(sp).  The frame pops at 8f then load
++	   stale r0/r1 into the handler's entry registers — harmless,
++	   they are call-clobbered and the real values are in the
++	   user-stack frame. */
++	tstb _udata+U_DATA__U_CURSIG
++	beq 8f
++	mov 8(sp),-(sp)		/* arg ur1 (saved r1) */
++	mov 12(sp),-(sp)	/* arg ur0 (saved r0: 10 + 2) */
++	mov 18(sp),-(sp)	/* arg upsw (PSW: 14 + 4) */
++	mov 18(sp),-(sp)	/* arg upc  (PC: 12 + 6) */
++	jsr pc,_sig_deliver
++	add $8,sp
++	tst r0
++	beq 8f
++	mov r0,12(sp)		/* rti enters the handler */
++	br 8f
++
++7:	/* Full preempt: restore the interrupted user registers, then
++	   detour through preempt_switchout (which re-saves them in a
++	   switchout frame, chksigs included).  On resume the rti
++	   below consumes the original trap frame — the user continues
++	   exactly where the tick landed. */
++	clrb _need_resched
++	mov (sp)+,r5
++	mov (sp)+,r4
++	mov (sp)+,r3
++	mov (sp)+,r2
++	mov (sp)+,r1
++	mov (sp)+,r0
++	jsr pc,_preempt_switchout
++
++	/* Resume point.  Caught-signal delivery (task #13): chksigs
++	   ran at switch-OUT (tricks.S) and a caught signal staged
++	   there was stashed with the udata — it must deliver on THIS
++	   return, not at some future syscall.  Frame here is bare:
++	   PC 0(sp), PSW 2(sp); user registers are live, so r0/r1 are
++	   preserved around the check (the non-delivery raced-SIG_IGN
++	   path must not clobber them). */
++	tstb _udata+U_DATA__U_CURSIG
++	beq 6f
++	mov r0,-(sp)		/* live user r0/r1 */
++	mov r1,-(sp)
++	/* now: r1 0(sp), r0 2(sp), PC 4(sp), PSW 6(sp) */
++	mov r1,-(sp)		/* arg ur1 */
++	mov r0,-(sp)		/* arg ur0 */
++	mov 10(sp),-(sp)	/* arg upsw (PSW: 6 + 4 pushes) */
++	mov 10(sp),-(sp)	/* arg upc  (PC: 4 + 6 pushes) */
++	jsr pc,_sig_deliver
++	add $8,sp
++	tst r0
++	beq 5f
++	mov r0,4(sp)		/* PC slot: rti enters the handler */
++5:	mov (sp)+,r1
++	mov (sp)+,r0
++6:	rti
++
++8:	mov (sp)+,r5
++	mov (sp)+,r4
++	mov (sp)+,r3
++	mov (sp)+,r2
++	mov (sp)+,r1
++	mov (sp)+,r0
++	rti
++
++/*
++ * Interrupt entry: DL11 receivers (vector 060 console, 0300 tty2)
++ *
++ * Both vectors share this stub; the C handler drains both ports,
++ * so it does not need to know which one fired.
++ */
++interrupt_tty:
++	mov r0,-(sp)
++	mov r1,-(sp)
++	mov r2,-(sp)
++	mov r3,-(sp)
++	mov r4,-(sp)
++	mov r5,-(sp)
++	incb _udata+U_DATA__U_ININTERRUPT
++	jsr pc,_tty_rx_interrupt
++	decb _udata+U_DATA__U_ININTERRUPT
++	mov (sp)+,r5
++	mov (sp)+,r4
++	mov (sp)+,r3
++	mov (sp)+,r2
++	mov (sp)+,r1
++	mov (sp)+,r0
++	rti
++
++/*
++ * Stray interrupt catcher
++ */
++interrupt_stray:
++	rti
++
++/*
++ * Trap handlers
++ *
++ * For now, all traps except TRAP (syscall) just print a message
++ * and halt. The syscall path will need a proper implementation
++ * for user-mode processes.
++ */
++
++trap_syscall:
++	/* TRAP instruction = Fuzix syscall entry
++	 *
++	 * Userspace convention (from syscall_pdp11.c):
++	 *   R0 = arg0, R1 = arg1, R2 = arg2
++	 *   TRAP $N  (N = syscall number in low byte of instruction)
++	 *
++	 * On return: R0 = retval, R1 = error (0 = no error)
++	 *
++	 * Hardware pushes PSW first then PC onto kernel stack
++	 * (SP swap already done by sequencer):
++	 *   (sp)   = old PC (pushed last, at top)
++	 *   2(sp)  = old PSW (pushed first, below)
++	 */
++	mov r0,-(sp)
++	mov r1,-(sp)
++	mov r2,-(sp)
++	mov r3,-(sp)
++	mov r4,-(sp)
++	mov r5,-(sp)
++
++	/* Honest u_insys (preempt campaign): the core's slice-expiry
++	   check (process.c) only fires when u_insys is CLEAR, and it
++	   was stuck at 1 from create_init forever — no spinner could
++	   ever be preempted.  Set here, cleared at exit and in
++	   doexec (which is how exec and init leave the kernel). */
++	movb $1,_udata+6	/* u_insys (offset 6) */
++
++	/* Extract syscall number from TRAP instruction operand.
++	 * Stack after pushing r5-r0: 6 words (12 bytes) of saved regs,
++	 * then trap frame: old PC at 12(sp), old PSW at 14(sp).
++	 * TRAP word is at (PC - 2). Low byte = syscall number.
++	 */
++	mov 12(sp),r3		/* trapped PC (past TRAP instruction) */
++	sub $2,r3		/* back to TRAP instruction word */
++	/* The TRAP instruction is in user space: read it with MFPI.
++	   The trap set the previous mode to user. */
++	mfpi (r3)
++	mov (sp)+,r3
++	bic $0xFF00,r3		/* zero-extend (movb sign-extends) */
++
++	/* Set up udata fields for unix_syscall */
++	movb r3,_udata+7	/* u_callno (offset 7, uint8_t) */
++	mov r0,_udata+18	/* u_argn */
++	mov r1,_udata+20	/* u_argn1 */
++	mov r2,_udata+22	/* u_argn2 */
++
++	/* Vector 034 PSW is priority 7; Fuzix runs syscalls with
++	   interrupts ENABLED (otherwise a blocking read sleeps into
++	   the scheduler at pri 7 and plt_idle's WAIT never wakes). */
++	bic $0340,*$0177776
++
++	jsr pc,_unix_syscall
++
++	/* Caught-signal delivery (task #13): a signal staged during
++	   the syscall — by the unix_syscall epilogue's chksigs or a
++	   blocking body — is delivered on THIS kernel exit.
++	   sig_deliver builds the frame on the user stack; we redirect
++	   the trap-frame PC into the handler.  The r0/r1 it preserves
++	   are u_retval/u_error: what the interrupted code sees on
++	   resume (an EINTR'd read keeps its -1/EINTR).  Frame here:
++	   r5..r0 at 0..10(sp), PC 12(sp), PSW 14(sp); args push
++	   right-to-left, caller pops (gcc-pdp11 ABI). */
++	tstb _udata+U_DATA__U_CURSIG
++	beq 5f
++	mov _udata+12,-(sp)	/* arg ur1 = u_error */
++	mov _udata+10,-(sp)	/* arg ur0 = u_retval */
++	mov 18(sp),-(sp)	/* arg upsw (PSW: 14 + 4 pushes) */
++	mov 18(sp),-(sp)	/* arg upc  (PC: 12 + 6 pushes) */
++	jsr pc,_sig_deliver
++	add $8,sp		/* caller pops the four args */
++	tst r0
++	beq 5f
++	mov r0,12(sp)		/* rti enters the handler */
++5:
++	/* Return: R0 = retval, R1 = error */
++	mov _udata+10,r0	/* u_retval */
++	mov _udata+12,r1	/* u_error */
++
++	clrb _udata+6		/* u_insys: leaving the kernel */
++
++	mov (sp)+,r5
++	mov (sp)+,r4
++	mov (sp)+,r3
++	mov (sp)+,r2
++	/* R1 and R0 restored from udata, skip saved copies */
++	add $4,sp		/* skip saved r1 and r0 */
++	rti
++
++/*
++ * A trap in user mode is the program's fault: plt_usertrap(vector)
++ * sends it a signal (SIGBUS, SIGILL, SIGTRAP, SIGIOT, SIGEMT) and
++ * the process dies or its handler runs, as for trap_mmu.  In kernel
++ * mode these traps are fatal.
++ */
++trap_bus:
++	mov $4,trapvec
++	mov $msg_bus,trapmsg
++	br trap_maybe_user
++trap_ill:
++	mov $010,trapvec
++	mov $msg_ill,trapmsg
++	br trap_maybe_user
++trap_bpt:
++	mov $014,trapvec
++	mov $msg_bpt,trapmsg
++	br trap_maybe_user
++trap_iot:
++	mov $020,trapvec
++	mov $msg_iot,trapmsg
++	br trap_maybe_user
++trap_pwr:
++	mov $msg_pwr,r0
++	br trap_fatal
++trap_emt:
++	mov $030,trapvec
++	mov $msg_emt,trapmsg
++	/* fall through */
++trap_maybe_user:
++	bit $0140000,2(sp)	/* previous mode user? */
++	bne 1f
++	mov trapmsg,r0
++	br trap_fatal
++1:	mov r0,-(sp)
++	mov r1,-(sp)
++	mov r2,-(sp)
++	mov r3,-(sp)
++	mov r4,-(sp)
++	mov r5,-(sp)
++	mov trapvec,-(sp)
++	jsr pc,_plt_usertrap
++	add $2,sp
++	br trap_user_ret
++
++	.data
++trapvec:	.word 0
++trapmsg:	.word 0
++	.text
++trap_mmu:
++	/* A user-mode fault is the process's problem, not the
++	   machine's: deliver SIGSEGV (default disposition kills the
++	   process via chksigs) and carry on.  Kernel-mode faults
++	   stay fatal.  Mode bits [15:14] of the pushed PSW: 00 =
++	   kernel, 11 = user. */
++	bit $0140000, 2(sp)
++	beq trap_mmu_fatal
++	mov r0,-(sp)
++	mov r1,-(sp)
++	mov r2,-(sp)
++	mov r3,-(sp)
++	mov r4,-(sp)
++	mov r5,-(sp)
++	jsr pc,_plt_usermmu
++trap_user_ret:
++	/* Held signals resume (and possibly refault); default SIGSEGV
++	   never returns — the process is gone and we run something
++	   else.  A CAUGHT SIGSEGV is staged in u_cursig: deliver it
++	   now (task #13), else the process would refault forever.
++	   Frame: r5..r0 at 0..10(sp), PC 12(sp), PSW 14(sp). */
++	tstb _udata+U_DATA__U_CURSIG
++	beq 4f
++	mov 8(sp),-(sp)		/* arg ur1 (saved r1) */
++	mov 12(sp),-(sp)	/* arg ur0 (saved r0: 10 + 2) */
++	mov 18(sp),-(sp)	/* arg upsw (PSW: 14 + 4) */
++	mov 18(sp),-(sp)	/* arg upc  (PC: 12 + 6) */
++	jsr pc,_sig_deliver
++	add $8,sp
++	tst r0
++	beq 4f
++	mov r0,12(sp)		/* rti enters the handler */
++4:	mov (sp)+,r5
++	mov (sp)+,r4
++	mov (sp)+,r3
++	mov (sp)+,r2
++	mov (sp)+,r1
++	mov (sp)+,r0
++	rti
++
++trap_mmu_fatal:
++	mov $msg_mmu,r0
++	/* fall through */
++
++trap_fatal:
++	bis $0340,*$0177776	/* IRQ off */
++	/* Output faulting PC using only outchar (no outstring) */
++	mov $041,r0		/* '!' */
++	jsr pc,outchar
++	/* Trap frame: (sp) = PC, 2(sp) = PSW */
++	mov (sp),r0		/* trapped PC */
++	jsr pc,outr0hex
++	mov $040,r0		/* space */
++	jsr pc,outchar
++	mov 2(sp),r0		/* trapped PSW */
++	jsr pc,outr0hex
++	mov $012,r0		/* newline */
++	jsr pc,outchar
++	halt
++
++msg_bus:
++	.asciz "\r\nBUS ERR PC="
++msg_ill:
++	.asciz "\r\nILL INST PC="
++msg_bpt:
++	.asciz "\r\nBPT PC="
++msg_iot:
++	.asciz "\r\nIOT PC="
++msg_pwr:
++	.asciz "\r\nPOWER FAIL PC="
++msg_emt:
++	.asciz "\r\nEMT PC="
++msg_mmu:
++	.asciz "\r\nMMU ABORT PC="
++	.even
++
+diff --git a/Kernel/platform/platform-pdp11dec/pdp11_endian_fix.py b/Kernel/platform/platform-pdp11dec/pdp11_endian_fix.py
+new file mode 100644
+index 000000000..12a929539
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/pdp11_endian_fix.py
+@@ -0,0 +1,70 @@
++#!/usr/bin/env python3
++"""
++Post-process a Fuzix filesystem image to convert 32-bit fields from
++little-endian (x86 host) to PDP-endian (word-swapped).
++
++PDP-11 GCC stores uint32_t with the HIGH word at the lower address.
++x86 stores uint32_t with the LOW word at the lower address.
++This script swaps the two 16-bit halves of every 32-bit field in the
++superblock and all inodes.
++"""
++import struct
++import sys
++
++BLOCK_SIZE = 512
++INODE_SIZE = 64
++INODES_PER_BLOCK = BLOCK_SIZE // INODE_SIZE  # 8
++
++# Offsets of uint32_t fields within a 64-byte dinode
++INODE_U32_OFFSETS = [8, 12, 16, 20]  # i_size, i_atime, i_mtime, i_ctime
++
++# Superblock: s_time is the only uint32_t
++# Layout: s_mounted(2) + s_isize(2) + s_fsize(2) + s_nfree(2) + s_free[50](100)
++#        + s_ninode(2) + s_inode[50](100) + s_fmod(1) + s_timeh(1) + s_time(4)
++SUPER_S_ISIZE_OFF = 2
++SUPER_S_TIME_OFF = 212
++
++
++def swap_word_pairs(data, offset):
++    """Swap the two 16-bit words of a uint32_t at the given offset."""
++    lo = struct.unpack_from('<H', data, offset)[0]
++    hi = struct.unpack_from('<H', data, offset + 2)[0]
++    struct.pack_into('<H', data, offset, hi)
++    struct.pack_into('<H', data, offset + 2, lo)
++
++
++def main():
++    if len(sys.argv) != 2:
++        print(f"Usage: {sys.argv[0]} <filesystem.img>", file=sys.stderr)
++        sys.exit(1)
++
++    path = sys.argv[1]
++    with open(path, 'rb') as f:
++        data = bytearray(f.read())
++
++    # Read s_isize from superblock (block 1)
++    sb_off = BLOCK_SIZE  # block 1
++    s_isize = struct.unpack_from('<H', data, sb_off + SUPER_S_ISIZE_OFF)[0]
++    print(f"  s_isize = {s_isize} (inode blocks 2..{s_isize - 1})")
++
++    # Swap superblock s_time
++    swap_word_pairs(data, sb_off + SUPER_S_TIME_OFF)
++
++    # Swap all inode 32-bit fields (blocks 2 through s_isize-1)
++    n_swapped = 0
++    for blk in range(2, s_isize):
++        blk_off = blk * BLOCK_SIZE
++        for i in range(INODES_PER_BLOCK):
++            ino_off = blk_off + i * INODE_SIZE
++            for field_off in INODE_U32_OFFSETS:
++                swap_word_pairs(data, ino_off + field_off)
++            n_swapped += 1
++
++    print(f"  Swapped {n_swapped} inodes, {n_swapped * 4 + 1} fields")
++
++    with open(path, 'wb') as f:
++        f.write(data)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/Kernel/platform/platform-pdp11dec/rules.mk b/Kernel/platform/platform-pdp11dec/rules.mk
+new file mode 100644
+index 000000000..d60ecf858
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/rules.mk
+@@ -0,0 +1,12 @@
++# Parsed by Kernel/Makefile (cwd = Kernel/) after target.mk.
++#
++# Kernel objects bake PROGBASE/PROGTOP and friends in from the
++# platform config.h, but nothing tracked that dependency: after a
++# config.h edit an incremental build links a chimera of old- and
++# new-geometry objects (2026-07-13: a stale valaddr rejected the
++# whole relocated user space -> "panic: no /init").  Make the
++# dependency explicit so config.h changes rebuild the world.
++PLATFORM_CONFIG_H = platform/platform-$(TARGET)/config.h
++$(patsubst %.c,%.o,$(wildcard *.c)): $(PLATFORM_CONFIG_H)
++$(patsubst %.c,%.o,$(wildcard cpu-$(CPU)/*.c)): $(PLATFORM_CONFIG_H)
++$(patsubst %.S,%.o,$(wildcard cpu-$(CPU)/*.S)): $(PLATFORM_CONFIG_H)
+diff --git a/Kernel/platform/platform-pdp11dec/sigtest.c b/Kernel/platform/platform-pdp11dec/sigtest.c
+new file mode 100644
+index 000000000..0910b6e54
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/sigtest.c
+@@ -0,0 +1,118 @@
++/*
++ * sigtest — caught-signal trampoline validation (task #13).
++ *
++ * Exercises every leg of the pdp11 signal delivery path with
++ * deterministic, probe-friendly output (tb_sigprobe and the
++ * silicon probe grep these needles):
++ *
++ *   PHASE 1 — compute leg (ISR-tail delivery).  Installs a SIGINT
++ *     handler, prints "READY SUM xxxx", then runs a register-
++ *     resident checksum spinner.  ^C mid-spin must print "CAUGHT"
++ *     from the handler and the interrupted lap must still total
++ *     the reference sum: a corrupted r2-r5, a lost PSW or a
++ *     misplaced resume PC all show up as "PHASE1 SUM MISMATCH".
++ *     Ends "PHASE1 OK LAPS n".
++ *
++ *   PHASE 2 — blocking leg (syscall-exit delivery).  Reinstalls
++ *     the handler (the previous delivery auto-reset it — V7
++ *     semantics), prints "PHASE2 READY", blocks in read().  ^C
++ *     must run the handler AND interrupt the read with EINTR:
++ *     "PHASE2 OK EINTR".
++ *
++ *   PHASE 3 — V7 reset (default disposition).  The phase-2
++ *     delivery reset the vector to SIG_DFL and we do NOT
++ *     reinstall.  Prints "PHASE3 READY" and spins; the next ^C
++ *     must KILL the process — the probe's needle is the shell
++ *     prompt coming back, and anything printed after PHASE3 READY
++ *     other than the death is a failure.
++ *
++ * The handler uses write() only: stdio is not reentrant.
++ */
++
++#include <stdio.h>
++#include <unistd.h>
++#include <signal.h>
++#include <errno.h>
++
++#define INNER 20000		/* ~80 ms/lap at 25 MHz: several
++				   clock ticks land inside every lap */
++
++static volatile int caught;
++
++static void handler(int sig)
++{
++	write(1, "CAUGHT\n", 7);
++	caught++;
++}
++
++/* One lap of register-resident arithmetic from a fixed starting
++   state: every call returns the same value.  At -Os (verified by
++   disassembly, inlined into main) the working set spans BOTH
++   register classes — a/d in call-clobbered r0/r1 (exercises the
++   kernel's frame save + __sigreturn restore), b/c in callee-saved
++   r4/r2 (exercises ABI preservation through the C handler) — and
++   the loop counter's dec/beq pair keeps live condition codes that
++   a lossy rtt would corrupt into a wrong lap count.  Any of those
++   failures diverges the total.  EIS-free by design (no mul/shift):
++   the emulator has its own coverage. */
++static unsigned int lap(void)
++{
++	unsigned int a = 0, b = 1, c = 3, d = 7;
++	int i;
++
++	for (i = 0; i < INNER; i++) {
++		a += b;
++		b ^= c;
++		c += d;
++		d += a | 1;
++	}
++	return a + b + c + d;
++}
++
++int main(int argc, char *argv[])
++{
++	unsigned int ref;
++	int laps, n;
++	char buf[32];
++
++	/* PHASE 1: catch mid-compute, prove register-exact resume */
++	signal(SIGINT, handler);
++	ref = lap();
++	printf("READY SUM %04x\n", ref);
++	fflush(stdout);
++	laps = 1;
++	while (!caught) {
++		if (lap() != ref) {
++			printf("PHASE1 SUM MISMATCH\n");
++			return 1;
++		}
++		laps++;
++	}
++	/* one clean lap after the catch: steady state holds too */
++	if (lap() != ref) {
++		printf("PHASE1 SUM MISMATCH\n");
++		return 1;
++	}
++	printf("PHASE1 OK LAPS %d\n", laps);
++	fflush(stdout);
++
++	/* PHASE 2: catch in a blocking read, prove EINTR */
++	signal(SIGINT, handler);	/* delivery reset it: reinstall */
++	caught = 0;
++	printf("PHASE2 READY\n");
++	fflush(stdout);
++	n = read(0, buf, sizeof(buf));
++	if (n < 0 && errno == EINTR && caught)
++		printf("PHASE2 OK EINTR\n");
++	else
++		printf("PHASE2 FAIL n=%d errno=%d caught=%d\n",
++		       n, errno, caught);
++	fflush(stdout);
++
++	/* PHASE 3: vector auto-reset to SIG_DFL, NOT reinstalled —
++	   the next ^C must kill us (shell prompt = pass) */
++	printf("PHASE3 READY\n");
++	fflush(stdout);
++	for (;;)
++		lap();
++}
+diff --git a/Kernel/platform/platform-pdp11dec/target.mk b/Kernel/platform/platform-pdp11dec/target.mk
+new file mode 100644
+index 000000000..6630ed05e
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/target.mk
+@@ -0,0 +1 @@
++export CPU = pdp11
+diff --git a/Kernel/platform/platform-pdp11dec/tricks.S b/Kernel/platform/platform-pdp11dec/tricks.S
+new file mode 100644
+index 000000000..1c21d2d30
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/tricks.S
+@@ -0,0 +1,389 @@
++#include "../../cpu-pdp11/kernel-pdp11.def"
++
++	.text
++
++	.globl _switchin
++	.globl _plt_switchout
++	.globl _preempt_switchout
++	.globl _dofork
++
++/*
++ * Campaign B: two resident 44KB banks (mm/bankfixed.c) + swap
++ * overflow.  Reference flow: Kernel/lib/z80fixedbank-core.s.
++ *
++ * Each process's bank holds a 512-byte udata STASH at offset 0
++ * (below the user image).  The stash is the complete kernel-side
++ * state: the udata struct AND the kernel stack (kstack top is
++ * _udata+512; switch/fork frames live inside the block).  Copying
++ * 256 words through the KIPAR5 window replaces the old 49KB swap
++ * of the whole process — a resident switch is 6 PAR writes and a
++ * 512-byte copy.
++ *
++ * Bank n starts at physical bank_click[n] (main.c).  The kernel
++ * reaches it through the KIPAR6 window at VA 0xC000; the udata
++ * stash is the first 512 bytes of the window.
++ */
++
++_plt_switchout:
++	bis $0340,*$0177776
++	clr -(sp)
++	mov r5,-(sp)
++	mov r4,-(sp)
++	mov r3,-(sp)
++	mov r2,-(sp)
++	mov r1,-(sp)
++#ifndef CONFIG_PDP11_04
++	PUSH_USP
++#endif
++	mov sp,_udata+U_DATA__U_SP
++
++	/* Stash the live udata (struct + kstack, this frame included)
++	   into our own bank so a later switchin — or a swapout of us
++	   while we sleep — finds current state.  IPL is 7. */
++	mov _udata+U_DATA__U_PAGE,r0
++	beq 1f			/* no bank (paranoia): nothing to stash */
++	jsr pc,stash_write
++1:
++	jsr pc,_getproc
++	mov r0,-(sp)
++	jsr pc,_switchin
++	jmp _plt_monitor
++
++/*
++ * preempt_switchout (task #12): called from the clock-ISR exit when
++ * returning to USER mode with need_resched set.  Same shape as
++ * plt_switchout with ONE deliberate difference: plt_switchout CLEARS
++ * the r0 frame slot (the syscall return-value convention — r0 is
++ * rebuilt from u_retval on the way out), but a preempted process
++ * gets NO new r0 — it resumes mid-computation, so the REAL r0 must
++ * ride the frame.  switchin's restore sequence is shape-agnostic
++ * about the slot's value, so both flavors share the same exit.
++ *
++ * On resume: rts pc back into the clock glue, whose rti consumes
++ * the original trap frame — the user continues where the tick hit.
++ */
++_preempt_switchout:
++	bis $0340,*$0177776
++	mov r0,-(sp)		/* REAL r0 — see above */
++	mov r5,-(sp)
++	mov r4,-(sp)
++	mov r3,-(sp)
++	mov r2,-(sp)
++	mov r1,-(sp)
++#ifndef CONFIG_PDP11_04
++	PUSH_USP
++#endif
++	mov sp,_udata+U_DATA__U_SP
++
++	/* Frame is safe: deliver pending signals now.  Default-fatal
++	   dispositions (a spinner's ^C) doexit inside and never come
++	   back — this is what makes compute loops interruptible at
++	   tick latency instead of next-syscall latency. */
++	jsr pc,_chksigs
++
++	/* Unlike a voluntary switchout — where the caller has already
++	   moved us off P_RUNNING before calling — a PREEMPTED process
++	   is still P_RUNNING here.  getproc panics ("extra running")
++	   if it walks the ptab and finds a runner, so transition
++	   ourselves to P_READY now.  Also set PFL_BATCH: getproc skips
++	   a batch-flagged process one round (clearing the flag), so a
++	   compute hog yields a turn instead of being re-picked
++	   immediately — the fairness penalty, straight from the z80
++	   fixedbank preemption model.  Skip if chksigs already changed
++	   our state (P_STOPPED, or torn down by a fatal signal). */
++	mov _udata,r0			/* u_ptab (offset 0) = our ptab */
++	cmpb $1,P_TAB__P_STATUS_OFFSET(r0)	/* still P_RUNNING? */
++	bne 3f
++	movb $2,P_TAB__P_STATUS_OFFSET(r0)	/* -> P_READY */
++	bisb $4,P_TAB__P_FLAGS_OFFSET(r0)	/* PFL_BATCH */
++3:
++	/* Stash + schedule, exactly as plt_switchout */
++	mov _udata+U_DATA__U_PAGE,r0
++	beq 1f
++	jsr pc,stash_write
++1:
++	jsr pc,_getproc
++	mov r0,-(sp)
++	jsr pc,_switchin
++	jmp _plt_monitor
++
++_switchin:
++	bis $0340,*$0177776
++	mov 2(sp),r0		/* incoming ptab ptr — grab it BEFORE
++				   leaving the caller's stack */
++	/* ALWAYS run switchin on the dedicated swap stack.  The
++	   resident path below copies the incoming stash OVER the live
++	   udata block — which contains the outgoing kernel stack.  Any
++	   word we push there (the saved ptab ptr) would be replaced by
++	   the incoming process's stacked data mid-copy and pop back as
++	   garbage.  z80fixedbank-core.s warns about exactly this
++	   ("this was a bitch to debug, please don't break it"); we
++	   re-derived the lesson from a 1701 in the boot log. */
++	mov $swapstack,sp
++	tst P_TAB__P_PAGE_OFFSET(r0)
++	bne resident
++
++	/* Swap path: incoming lives on disk.  _swapper(p) frees a
++	   bank if needed (evicting a victim whose stash is current —
++	   written at its last switchout) and reads the incoming
++	   bank image in.  The disk driver runs the big transfers
++	   with interrupts enabled (dev_rl.c, rawflag 2) so the
++	   console and clock stay alive; everything here therefore
++	   runs on the dedicated swap stack — ISR frames must not
++	   land on a kernel stack that lives inside the udata block —
++	   and under inswap, which tells timer_interrupt not to
++	   trust mid-swap state.  SP is reloaded from the incoming
++	   process's stash below, so the old SP is not saved.  (We are
++	   already on the swap stack — set at entry.) */
++	incb _inswap
++	mov r0,-(sp)
++	mov r0,-(sp)
++	jsr pc,_swapper
++	mov (sp)+,r0
++	mov (sp)+,r0
++	clrb _inswap
++	bis $0340,*$0177776
++	/* p_page now holds the bank swapper chose — fall through */
++
++resident:
++	/* Tormod's optimisation (z80fixedbank): if the incoming
++	   process already owns the live udata, skip the stash load —
++	   the live copy is newer than (or identical to) the stash. */
++	cmp _udata+U_DATA__U_PTAB,r0
++	beq owned
++
++	/* Load the incoming stash: KIPAR6 -> its bank, copy 256
++	   words window -> _udata.  Registers r1-r3 are dead here
++	   (restored from the incoming frame below). */
++	mov r0,-(sp)		/* ptab ptr across the copy */
++	mov P_TAB__P_PAGE_OFFSET(r0),r0
++	jsr pc,bank_window
++	mov $0140000,r1		/* window VA 0xC000 */
++	mov $_udata,r2
++	mov $256,r3
++2:	mov (r1)+,(r2)+
++	dec r3
++	bne 2b
++	mov (sp)+,r0
++
++	/* The stash predates any swap cycle the process went
++	   through: refresh u_page from the ptab truth. */
++	mov P_TAB__P_PAGE_OFFSET(r0),_udata+U_DATA__U_PAGE
++
++	cmp _udata+U_DATA__U_PTAB,r0
++	bne switchfail
++
++owned:
++	movb $P_RUNNING,P_TAB__P_STATUS_OFFSET(r0)
++	/* Point UIPAR1-6 at the incoming bank (reads u_page). */
++	jsr pc,_program_user_map	/* clobbers r0 — done with it */
++	clr _runticks
++	mov _udata+U_DATA__U_SP,sp
++#ifndef CONFIG_PDP11_04
++	POP_USP
++#endif
++	mov (sp)+,r1
++	mov (sp)+,r2
++	mov (sp)+,r3
++	mov (sp)+,r4
++	mov (sp)+,r5
++	mov (sp)+,r0
++	rts pc
++switchfail:
++	jsr pc,outr0hex
++	mov $badswitchmsg,r0
++	jsr pc,outstring
++	jmp _plt_monitor
++
++/*
++ * dofork: the child's bank was already allocated by pagemap_alloc
++ * in ptab_alloc (C side) — including any victim eviction to disk —
++ * so by the time we run, both parent and child own banks.  Build
++ * the child's return frame, stash a child-flavored udata into the
++ * child's bank, then copy the parent's user image bank-to-bank.
++ * The parent returns the child's pid; the child, on its first
++ * switchin, loads the stash and returns 0 from here.
++ */
++_dofork:
++	mov 2(sp),r0
++	mov r0,fork_proc_ptr
++
++	/* Build child's return frame (matches _plt_switchout for
++	   _switchin).  Child will return from _switchin -> dofork
++	   caller with r0 = 0. */
++	clr -(sp)
++	mov r5,-(sp)
++	mov r4,-(sp)
++	mov r3,-(sp)
++	mov r2,-(sp)
++	mov r1,-(sp)
++#ifndef CONFIG_PDP11_04
++	PUSH_USP
++#endif
++	mov sp,_udata+U_DATA__U_SP
++
++	/* Make the live udata claim to be the child (ptab AND bank),
++	   stash it into the CHILD's bank, then restore the parent
++	   identity.  Mask for the stash write: an IRQ mid-copy could
++	   capture a transient u_ininterrupt=1 into the child image,
++	   to be restored as truth on the child's first switchin —
++	   the same hazard the old swap-based dofork masked for. */
++	mov _udata,fork_parent_ptab
++	mov _udata+U_DATA__U_PAGE,fork_parent_page
++	mov *$0177776,fork_psw
++	bis $0340,*$0177776
++	mov r0,_udata
++	mov P_TAB__P_PAGE_OFFSET(r0),_udata+U_DATA__U_PAGE
++	mov P_TAB__P_PAGE_OFFSET(r0),r0
++	jsr pc,stash_write
++	mov fork_parent_ptab,_udata
++	mov fork_parent_page,_udata+U_DATA__U_PAGE
++	mov fork_psw,*$0177776
++
++	/* Copy the parent's user image to the child's bank: 22272
++	   words (43.5K) through both windows, interrupts live.  Safe:
++	   dofork is a syscall (u_insys) so no preemption; ISR-driven
++	   EIS traps are kernel-mode and eis_fetch reads identity for
++	   kernel sources, so neither window moves under us. */
++	jsr pc,bank_copy
++
++	/* Unwind the child's frame, RESTORING r2-r5 for the parent:
++	   gcc treats them as callee-saved across dofork() (_fork
++	   caches &udata in r5 and its saved PSW in r4), but the
++	   pushes above belong to the CHILD's switchin restore and
++	   bank_copy just used r0-r5 as cursors.  Discarding the
++	   frame here returned bank_copy's leftover PAR cursor in r5;
++	   _fork's p_status store then dereferenced it — a wild byte
++	   write whose target is whatever text word sits at 0x588/
++	   0x848 (latent since Campaign B; task13's layout shuffle
++	   made it kernel-text corruption — 2026jul22_sigtramp.md). */
++#ifndef CONFIG_PDP11_04
++	add $2,sp		/* USP word: dofork never moves USP */
++#endif
++	add $2,sp		/* r1: call-clobbered per gcc ABI */
++	mov (sp)+,r2
++	mov (sp)+,r3
++	mov (sp)+,r4
++	mov (sp)+,r5
++	add $2,sp		/* the child's r0=0 word */
++
++	/* makeproc(child_ptab, &_udata) — sets up child ptab entry.
++	   Note: makeproc sets u->u_ptab = p AND u->u_page = p_page,
++	   corrupting the parent's live udata.  Restore both. */
++	mov $_udata,-(sp)
++	mov fork_proc_ptr,-(sp)
++	jsr pc,_makeproc
++	add $4,sp
++	mov fork_parent_ptab,_udata
++	mov fork_parent_page,_udata+U_DATA__U_PAGE
++
++	/* Return child PID to parent */
++	mov fork_proc_ptr,r0
++	mov P_TAB__P_PID_OFFSET(r0),r0
++	clr _runticks
++	rts pc
++
++/*
++ * stash_write: copy the live udata block (256 words) into the bank
++ * whose id is in r0.  Caller holds IPL 7.  Clobbers r0-r3.
++ */
++stash_write:
++	jsr pc,bank_window
++	mov $_udata,r1
++	mov $0140000,r2		/* window VA 0xC000 */
++	mov $256,r3
++1:	mov (r1)+,(r2)+
++	dec r3
++	bne 1b
++	rts pc
++
++/*
++ * bank_window: point KIPAR6 (kernel VA 0xC000) at the base of bank r0.
++ * Clobbers r0.  The window is left there: whoever uses it next sets
++ * it again.  Interrupt handlers must not move it.
++ */
++bank_window:
++	asl r0
++	mov _bank_click(r0),*$0172354
++	rts pc
++
++/*
++ * bank_copy: the parent's user image (VA 0x2000-0xCDFF, 22272 words,
++ * the current user map) to the child's bank at offset 0x200.  Reads
++ * with MFPI, writes through the KIPAR6 window, 8 KB at a time.
++ * Interrupts may be live (see dofork).  Clobbers r0-r5.
++ */
++bank_copy:
++	bis $030000,*$0177776		/* previous mode = user, for MFPI */
++	mov fork_proc_ptr,r0
++	mov P_TAB__P_PAGE_OFFSET(r0),r0	/* child bank */
++	asl r0
++	mov _bank_click(r0),r4
++	add $010,r4			/* PAR of the child's VA 0x2000 */
++	mov $0x2000,r1			/* user VA cursor */
++	mov $6,r5			/* chunks */
++1:	mov r4,*$0172354		/* KIPAR6 = destination chunk */
++	mov $0140000,r2			/* window VA 0xC000 */
++	mov $010000,r3			/* 4096 words = 8 KB */
++	cmp r5,$1
++	bne 2f
++	mov $03400,r3			/* last: 0xE00 bytes = 1792 words */
++2:	mfpi (r1)+
++	mov (sp)+,(r2)+
++	sob r3,2b
++	add $0200,r4
++	sob r5,1b
++	rts pc
++
++/*
++ * uint16_t phys_present(uint16_t click): 1 if there is memory at
++ * physical click * 64 (read through the KIPAR6 window with the bus
++ * error vector caught).
++ */
++	.globl _phys_present
++_phys_present:
++	mov *$4,-(sp)
++	mov *$6,-(sp)
++	mov $pp_nx,*$4
++	mov $0340,*$6
++	mov 6(sp),*$0172354
++	mov $1,r0
++	tst *$0140000
++pp_out:
++	mov (sp)+,*$6
++	mov (sp)+,*$4
++	rts pc
++pp_nx:
++	clr r0
++	mov $pp_out,(sp)	/* resume at pp_out */
++	rti
++
++fork_proc_ptr:	 .word 0
++fork_parent_ptab: .word 0
++fork_parent_page: .word 0
++fork_psw:	 .word 0
++copy_chunks:	 .word 0
++
++badswitchmsg:
++	.ascii "_switchin: FAIL"
++	.byte 13,10,0
++	.even
++	/* Swap runs with interrupts live: worst case a DL11 RX ISR
++	   with the KW11-L clock ISR nested on top of it (BR6 > BR4)
++	   plus an EIS emulation trap, all on top of the swapper's own
++	   C call chain.  256 was fine when swap ran masked; it is not
++	   safe headroom now. */
++	.= .+512
++swapstack:
++
++/* uint16_t get_usp(void), void set_usp(uint16_t): the user mode SP */
++	.globl _get_usp
++	.globl _set_usp
++_get_usp:
++	PUSH_USP
++	mov (sp)+,r0
++	rts pc
++_set_usp:
++	mov 2(sp),-(sp)
++	POP_USP
++	rts pc
+diff --git a/Kernel/platform/platform-pdp11dec/user.ld b/Kernel/platform/platform-pdp11dec/user.ld
+new file mode 100644
+index 000000000..0f2db67ea
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/user.ld
+@@ -0,0 +1,51 @@
++/*
++ * Linker script for Fuzix PDP-11 userspace binaries.
++ *
++ * Code is linked at PROGBASE = 0x2000.
++ * The crt0 header occupies the first 16 bytes (replaced by exec header on disk,
++ * overwritten by sys_stubs at load time). __start2 at 0x2010 is the entry point.
++ * PROGTOP = 0xE000, so max code+data+bss = ~48KB.
++ */
++OUTPUT_FORMAT("a.out-pdp11", "a.out-pdp11", "a.out-pdp11")
++OUTPUT_ARCH(pdp11)
++PROVIDE (__stack = 0);
++
++SECTIONS
++{
++  . = 0x2000;
++  .text :
++  {
++    CREATE_OBJECT_SYMBOLS
++    *(.text)
++    *(.dynrel)
++    *(.hash)
++    *(.dynsym)
++    *(.dynstr)
++    *(.rules)
++    *(.need)
++    _etext = .;
++    __etext = .;
++    . = ALIGN(2);
++  }
++  .data :
++  {
++    *(.dynamic)
++    *(.got)
++    *(.plt)
++    *(.data)
++    *(.linux-dynamic)
++    CONSTRUCTORS
++    _edata  =  .;
++    __edata  =  .;
++    . = ALIGN(2);
++  }
++  .bss :
++  {
++    __bss_start = .;
++   *(.bss)
++   *(COMMON)
++   . = ALIGN(2);
++   _end = . ;
++   __end = . ;
++  }
++}
+diff --git a/Kernel/platform/platform-pdp11dec/usermem_mfpi.S b/Kernel/platform/platform-pdp11dec/usermem_mfpi.S
+new file mode 100644
+index 000000000..376c635df
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/usermem_mfpi.S
+@@ -0,0 +1,188 @@
++/*
++ * User memory access with MFPI/MTPI.
++ *
++ * The user map (UIPARs) always describes the current process, so the
++ * kernel reads and writes its memory with MFPI/MTPI, previous mode set
++ * to user.  Word copies when both addresses are even, otherwise byte by
++ * byte (a byte write is a read-modify-write of the user word).
++ *
++ * The callers (Kernel/usermem.c) have checked the addresses.
++ * gcc calling convention: arguments at 2(sp), 4(sp) ..., r0-r1 scratch.
++ * Offsets are decimal (GNU as).
++ */
++#include "../../cpu-pdp11/kernel-pdp11.def"
++
++	.text
++	.globl	__uget, __uput, __uzero
++	.globl	__ugetc, __ugetw, __uputc, __uputw
++
++/*
++ * Previous mode = user, and make sure the user map is the current
++ * process's: the kernel touches a new process's memory (create_init,
++ * exec) before it has run, so before switchin loaded its map.
++ * Clobbers r0.
++ */
++	.macro	PREV_USER
++	bis	$030000,*$0177776
++	cmp	_udata+U_DATA__U_PAGE,_umap_page
++	beq	.+6
++	jsr	pc,_program_user_map
++	.endm
++
++/* int _uget(const uint8_t *user, uint8_t *dest, usize_t count) */
++__uget:
++	mov	r2,-(sp)
++	mov	r3,-(sp)
++	PREV_USER
++	mov	6(sp),r0		/* user */
++	mov	8(sp),r1		/* dest */
++	mov	10(sp),r2		/* count */
++	beq	9f
++	bit	$1,r0
++	bne	3f
++	bit	$1,r1
++	bne	3f
++	mov	r2,r3
++	clc
++	ror	r3			/* words */
++	beq	2f
++1:	mfpi	(r0)+
++	mov	(sp)+,(r1)+
++	sob	r3,1b
++2:	bic	$0177776,r2		/* odd byte left? */
++	beq	9f
++3:	mov	r0,r3			/* byte loop */
++	bic	$1,r3
++	mfpi	(r3)
++	bit	$1,r0
++	beq	4f
++	movb	1(sp),(r1)+
++	br	5f
++4:	movb	(sp),(r1)+
++5:	tst	(sp)+
++	inc	r0
++	sob	r2,3b
++9:	clr	r0
++	mov	(sp)+,r3
++	mov	(sp)+,r2
++	rts	pc
++
++/* int _uput(const uint8_t *source, uint8_t *user, usize_t count) */
++__uput:
++	mov	r2,-(sp)
++	mov	r3,-(sp)
++	PREV_USER
++	mov	6(sp),r0		/* source */
++	mov	8(sp),r1		/* user */
++	mov	10(sp),r2		/* count */
++	beq	9f
++	bit	$1,r0
++	bne	3f
++	bit	$1,r1
++	bne	3f
++	mov	r2,r3
++	clc
++	ror	r3
++	beq	2f
++1:	mov	(r0)+,-(sp)
++	mtpi	(r1)+
++	sob	r3,1b
++2:	bic	$0177776,r2
++	beq	9f
++3:	mov	r1,r3
++	bic	$1,r3
++	mfpi	(r3)
++	bit	$1,r1
++	beq	4f
++	movb	(r0)+,1(sp)
++	br	5f
++4:	movb	(r0)+,(sp)
++5:	mtpi	(r3)
++	inc	r1
++	sob	r2,3b
++9:	clr	r0
++	mov	(sp)+,r3
++	mov	(sp)+,r2
++	rts	pc
++
++/* int _uzero(uint8_t *user, usize_t count) */
++__uzero:
++	mov	r2,-(sp)
++	mov	r3,-(sp)
++	PREV_USER
++	mov	6(sp),r1		/* user */
++	mov	8(sp),r2		/* count */
++	beq	9f
++	bit	$1,r1
++	bne	3f
++	mov	r2,r3
++	clc
++	ror	r3
++	beq	2f
++1:	clr	-(sp)
++	mtpi	(r1)+
++	sob	r3,1b
++2:	bic	$0177776,r2
++	beq	9f
++3:	mov	r1,r3
++	bic	$1,r3
++	mfpi	(r3)
++	bit	$1,r1
++	beq	4f
++	clrb	1(sp)
++	br	5f
++4:	clrb	(sp)
++5:	mtpi	(r3)
++	inc	r1
++	sob	r2,3b
++9:	clr	r0
++	mov	(sp)+,r3
++	mov	(sp)+,r2
++	rts	pc
++
++/* int16_t _ugetc(const uint8_t *user) */
++__ugetc:
++	PREV_USER
++	mov	2(sp),r1
++	mov	r1,r0
++	bic	$1,r0
++	mfpi	(r0)
++	mov	(sp)+,r0
++	bit	$1,r1
++	beq	1f
++	swab	r0
++1:	bic	$0177400,r0
++	rts	pc
++
++/* uint16_t _ugetw(const uint16_t *user) */
++__ugetw:
++	PREV_USER
++	mov	2(sp),r0
++	mfpi	(r0)
++	mov	(sp)+,r0
++	rts	pc
++
++/* int _uputc(uint16_t value, uint8_t *user) */
++__uputc:
++	PREV_USER
++	mov	4(sp),r1
++	mov	r1,r0
++	bic	$1,r0
++	mfpi	(r0)
++	bit	$1,r1
++	beq	1f
++	movb	4(sp),1(sp)		/* value: 2(sp) + the pushed word */
++	br	2f
++1:	movb	4(sp),(sp)
++2:	mtpi	(r0)
++	clr	r0
++	rts	pc
++
++/* int _uputw(uint16_t value, uint16_t *user) */
++__uputw:
++	PREV_USER
++	mov	4(sp),r0
++	mov	2(sp),-(sp)
++	mtpi	(r0)
++	clr	r0
++	rts	pc
+diff --git a/Kernel/platform/platform-pdp11dec/usermem_std-pdp11.S b/Kernel/platform/platform-pdp11dec/usermem_std-pdp11.S
+new file mode 100644
+index 000000000..e69de29bb
+-- 
+2.56.0
+

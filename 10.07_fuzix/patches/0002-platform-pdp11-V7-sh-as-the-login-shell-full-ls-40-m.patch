@@ -1,0 +1,103 @@
+From 691a16ec4af73ccf613831348720ddeac2615b7d Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 17:09:34 -0600
+Subject: [PATCH 02/13] platform-pdp11: V7 sh as the login shell, full ls, 40
+ more utilities
+
+---
+ .../platform-pdp11/build_fuzix_disk.sh        | 25 ++++++++++++++++---
+ Kernel/platform/platform-pdp11/init.c         |  8 +++---
+ 2 files changed, 25 insertions(+), 8 deletions(-)
+
+diff --git a/Kernel/platform/platform-pdp11/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11/build_fuzix_disk.sh
+index ff46c94c9..9e7210909 100755
+--- a/Kernel/platform/platform-pdp11/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11/build_fuzix_disk.sh
+@@ -65,7 +65,7 @@ SIZE=pdp11-aout-size
+ LIBDIR="$FUZIXDIR/Library/libs"
+ INCDIR="$FUZIXDIR/Library/include"
+ CFLAGS="-fno-strict-aliasing -fomit-frame-pointer -fno-builtin -msoft-float -Os -I$INCDIR -I$INCDIR/pdp11"
+-LDFLAGS="-L$LIBDIR -lcpdp11 -lgcc -T$SCRIPTDIR/user.ld"
++LDFLAGS="-L$LIBDIR -lcpdp11 -lgcc $($CC -print-libgcc-file-name) -T$SCRIPTDIR/user.ld"
+ CRT0="$LIBDIR/crt0_pdp11.o"
+ UTILDIR="$FUZIXDIR/Applications/util"
+ BUILDDIR="$SCRIPTDIR/build"
+@@ -123,13 +123,27 @@ for prog in ssh cat echo pwd mkdir rmdir chmod hi \
+             true false yes basename dirname sleep whoami uname printenv \
+             head tee wc tr rm kill id chown chgrp uniq more tail od \
+             dd df du mount umount sync remount uptime \
+-            rx sx cksum; do
++            rx sx cksum \
++            cp grep sed sort ps free date touch cmp cut ed env stty sum \
++            tar which xargs seq cal factor killall mknod reboot setdate su \
++            passwd who write sync logname groups fgrep uud uue banner \
++            mkfifo; do
+     build_util $prog "$UTILDIR/$prog.c"
+     make_fuz $prog
++    EXTRA_BINS="$EXTRA_BINS $prog"
+ done
++
++# --- V7 Bourne shell: pipes, redirection, scripts ---
++SHDIR="$FUZIXDIR/Applications/V7/cmd/sh"
++echo "Building sh (V7)..."
++build_util sh $(for f in args blok builtin cmd ctype error expand fault io \
++    macro main msg name print service setbrk stak string word xec glob; do
++    echo "$SHDIR/$f.c"; done)
++make_fuz sh
++EXTRA_BINS="$EXTRA_BINS sh"
+ # Minimal ls (upstream ls.c is too large for 16KB)
+ echo "Building ls (minimal)..."
+-build_util ls "$UTILDIR/lsmin.c"
++build_util ls "$UTILDIR/ls.c"
+ make_fuz ls
+ 
+ # --- Colossal Cave Adventure (needs the 48KB user space) ---
+@@ -248,7 +262,7 @@ echo "Populating filesystem..."
+ # gives whoami/getpwuid something to answer with; liberror.txt gives
+ # strerror its message table.
+ cat > "$BUILDDIR/passwd" <<'PWEOF'
+-root::0:0:root:/:/bin/ssh
++root::0:0:root:/:/bin/sh
+ PWEOF
+ cat > "$BUILDDIR/group" <<'GREOF'
+ root::0:
+@@ -378,6 +392,9 @@ bget $BUILDDIR/sigtest.fuz sigtest
+ chmod 755 sigtest
+ bget $BUILDDIR/levee.fuz levee
+ chmod 755 levee
++$(for b in $EXTRA_BINS; do echo "bget $BUILDDIR/$b.fuz $b"; echo "chmod 755 $b"; done)
++ln cp mv
++ln cp ln
+ cd /etc
+ bget $BUILDDIR/passwd passwd
+ chmod 644 passwd
+diff --git a/Kernel/platform/platform-pdp11/init.c b/Kernel/platform/platform-pdp11/init.c
+index 2cc0d4103..e537623ac 100644
+--- a/Kernel/platform/platform-pdp11/init.c
++++ b/Kernel/platform/platform-pdp11/init.c
+@@ -12,7 +12,7 @@
+ #include <sys/wait.h>
+ #include <syscalls.h>	/* setpgrp */
+ 
+-static const char *sh_argv[] = { "-ssh", (void *)0 };
++static const char *sh_argv[] = { "-sh", (void *)0 };
+ static const char *sh_envp[] = { "PATH=/bin", "HOME=/", (void *)0 };
+ static const char msg[] = "\r\n[init: shell exited, restarting]\r\n";
+ 
+@@ -45,10 +45,10 @@ static void spawn(int t)
+ 		open(ttydev[t], O_RDWR);	/* fd 0 = stdin */
+ 		dup(0);				/* fd 1 = stdout */
+ 		dup(0);				/* fd 2 = stderr */
+-		execve("/bin/ssh", (char **)sh_argv, (char **)sh_envp);
+-		/* if exec fails, try sh */
+-		sh_argv[0] = "-sh";
+ 		execve("/bin/sh", (char **)sh_argv, (char **)sh_envp);
++		/* if exec fails, try the small shell */
++		sh_argv[0] = "-ssh";
++		execve("/bin/ssh", (char **)sh_argv, (char **)sh_envp);
+ 		write(1, "init: no shell\r\n", 16);
+ 		_exit(1);
+ 	}
+-- 
+2.56.0
+

@@ -591,6 +591,7 @@ function normalizeBuilder(cfg) {
     cfg.serial[k] = cfg.serial[k] || { enabled: false, port: def.default_port, baud: def.default_baud };
   });
   if (cfg.serial.kw11 === undefined) cfg.serial.kw11 = false;
+  if (cfg.serial.kw11_freq === undefined) cfg.serial.kw11_freq = "50";
   cfg.network = cfg.network || {};
   (cat.network || []).forEach((n) => {
     cfg.network[n.key] = Object.assign({ enabled: false, interface: n.default_interface, mac: "" }, cfg.network[n.key] || {});
@@ -740,7 +741,9 @@ function builderSections(cfg) {
   out.push(el("section", { class: "unit" },
     el("div", { class: "unit-head" }, el("h2", { text: "SERIAL LINES & CLOCK" }), el("span", { class: "silk-dim", text: "emulated DL11 on a BeagleBone UART" })),
     serRows,
-    el("div", { class: "toggle-row" }, paddle(ser, "kw11", "KW11 line clock", "50/60 Hz LTC interrupts", { violet: true }))));
+    el("div", { class: "toggle-row" }, paddle(ser, "kw11", "KW11 line clock", "50/60 Hz LTC interrupts", { violet: true, rerender: true })),
+    ser.kw11 ? el("div", { class: "row2" },
+      field("Line clock frequency", bindSelect(ser, "kw11_freq", [["50", "50 Hz"], ["60", "60 Hz"]], null))) : null));
 
   // --- network (QBUS only)
   if ((cat.network || []).length) {

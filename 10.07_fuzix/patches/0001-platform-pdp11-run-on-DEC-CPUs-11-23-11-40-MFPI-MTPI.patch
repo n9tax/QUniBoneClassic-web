@@ -1,0 +1,534 @@
+From 2e1664a53f49c77945740855e68064ac0961f720 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 17:02:44 -0600
+Subject: [PATCH 01/13] platform-pdp11: run on DEC CPUs (11/23, 11/40):
+ MFPI/MTPI for the user SP, optional second DL11 and KW11-L register, GNU as
+ boot block; ucp: longer lines
+
+---
+ Kernel/cpu-pdp11/kernel-pdp11.def             |  29 +++++
+ Kernel/cpu-pdp11/lowlevel-pdp11.S             |   3 +-
+ .../platform/platform-pdp11/boot_fuzix_gas.S  | 118 ++++++++++++++++++
+ Kernel/platform/platform-pdp11/devices.c      |   3 +-
+ Kernel/platform/platform-pdp11/devtty.c       |  30 ++++-
+ Kernel/platform/platform-pdp11/devtty.h       |   1 +
+ Kernel/platform/platform-pdp11/init.c         |  12 +-
+ Kernel/platform/platform-pdp11/main.c         |   7 +-
+ Kernel/platform/platform-pdp11/pdp11.S        |  46 ++++++-
+ Kernel/platform/platform-pdp11/tricks.S       |  20 ++-
+ Standalone/ucp.c                              |   6 +-
+ 11 files changed, 254 insertions(+), 21 deletions(-)
+ create mode 100644 Kernel/platform/platform-pdp11/boot_fuzix_gas.S
+
+diff --git a/Kernel/cpu-pdp11/kernel-pdp11.def b/Kernel/cpu-pdp11/kernel-pdp11.def
+index 5610c652b..f91fc1d17 100644
+--- a/Kernel/cpu-pdp11/kernel-pdp11.def
++++ b/Kernel/cpu-pdp11/kernel-pdp11.def
+@@ -71,3 +71,32 @@
+ #define SIGPWR		30
+ #define SIGSYS		31
+ #define	SIGUNUSED	31
++
++/*
++ * User stack pointer access from kernel mode.
++ *
++ * DEC CPUs with memory management (11/23, 11/34, 11/40, 11/73 ...) read and
++ * write the user mode SP with MFPI SP / MTPI SP, with the PSW's previous
++ * mode set to user.  The Stensat FPGA CPU has no MFPI/MTPI; it maps the
++ * user SP at 177716 instead: build with -DCONFIG_USP_MAPPED for it.
++ *
++ * PUSH_USP pushes the user SP on the kernel stack, POP_USP pops the top of
++ * the kernel stack into the user SP.
++ */
++#ifdef CONFIG_USP_MAPPED
++	.macro PUSH_USP
++	mov	*$0177716,-(sp)
++	.endm
++	.macro POP_USP
++	mov	(sp)+,*$0177716
++	.endm
++#else
++	.macro PUSH_USP
++	bis	$030000,*$0177776	/* previous mode = user */
++	mfpi	sp
++	.endm
++	.macro POP_USP
++	bis	$030000,*$0177776
++	mtpi	sp
++	.endm
++#endif
+diff --git a/Kernel/cpu-pdp11/lowlevel-pdp11.S b/Kernel/cpu-pdp11/lowlevel-pdp11.S
+index 4add7b5b4..dd9efddc9 100644
+--- a/Kernel/cpu-pdp11/lowlevel-pdp11.S
++++ b/Kernel/cpu-pdp11/lowlevel-pdp11.S
+@@ -82,7 +82,8 @@ _doexec:
+ 	/* Set user SP.  The Stensat FPGA CPU has no MFPI/MTPI —
+ 	   the user SP (alt_sp) is memory-mapped at 177716 instead.
+ 	   RTI/RTT swaps it into R6 on the kernel->user transition. */
+-	mov r1,*$0177716
++	mov r1,-(sp)
++	POP_USP
+ 
+ 	/* PSW is
+ 	   [mode.2][prevmode.2][grs][revid.2][cissusp][pri.3][flags]
+diff --git a/Kernel/platform/platform-pdp11/boot_fuzix_gas.S b/Kernel/platform/platform-pdp11/boot_fuzix_gas.S
+new file mode 100644
+index 000000000..2fdab7e5d
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11/boot_fuzix_gas.S
+@@ -0,0 +1,118 @@
++/*
++ * Fuzix RL02 boot block, GNU as version of boot_fuzix.s.
++ *
++ * A DEC RL boot ROM (or SIMH "boot rl0", or the QBone RL loader) reads
++ * the first 512 bytes of the disk to address 0 and starts at 0.  This
++ * code fits in those 512 bytes.  It loads the kernel from RL02 sectors
++ * 4.. (256 bytes each) to address 01000 and jumps there.
++ *
++ * Numbers are octal when they start with 0, decimal otherwise.
++ */
++	.text
++RLCS	= 0174400
++RLBA	= 0174402
++RLDA	= 0174404
++RLMP	= 0174406
++XCSR	= 0177564
++XBUF	= 0177566
++
++KERN_START = 4
++KERN_NSECT = 160		/* 40 KB */
++KERN_ADDR  = 01000
++
++	.globl	start
++start:
++	nop			/* boot block signature */
++	br	boot
++
++	. = start + 040
++boot:
++	mov	$0340, @$0177776
++	mov	$KERN_ADDR, sp
++	mov	$msg, r0
++	jsr	pc, puts
++
++	clr	curcyl
++	mov	$KERN_ADDR, r2		/* destination */
++	mov	$KERN_START, r3		/* linear sector */
++	mov	$KERN_NSECT, r4		/* count */
++
++next:
++	tstb	@$RLCS
++	bpl	next
++	/* cylinder = r3 / 80, r0 = r3 % 80 */
++	mov	r3, r0
++	clr	r5
++1:	cmp	r0, $80
++	blo	2f
++	sub	$80, r0
++	inc	r5
++	br	1b
++2:	cmp	r5, curcyl
++	beq	noseek
++
++	/* seek: difference in bits 15:7, bit 2 = outward */
++	mov	r5, r1
++	sub	curcyl, r1
++	bpl	3f
++	neg	r1
++	ash	$7, r1
++	br	4f
++3:	ash	$7, r1
++	bis	$4, r1
++4:	bis	$1, r1			/* marker bit, as DEC's seek uses */
++	mov	r1, @$RLDA
++	mov	$6, @$RLCS		/* seek */
++5:	tstb	@$RLCS
++	bpl	5b
++	tst	@$RLCS
++	bmi	error
++	mov	r5, curcyl
++
++noseek:
++	clr	r1
++	cmp	r0, $40
++	blo	6f
++	sub	$40, r0
++	bis	$0100, r1		/* head 1 */
++6:	bis	r0, r1
++	mov	r5, r0
++	ash	$7, r0
++	bis	r0, r1
++	mov	r2, @$RLBA
++	mov	r1, @$RLDA
++	mov	$-128, @$RLMP		/* 128 words */
++	mov	$014, @$RLCS		/* read data */
++7:	tstb	@$RLCS
++	bpl	7b
++	tst	@$RLCS
++	bmi	error
++	add	$256, r2
++	inc	r3
++	dec	r4
++	bne	next
++
++	mov	$crlf, r0
++	jsr	pc, puts
++	jmp	@$KERN_ADDR
++
++error:
++	mov	$errmsg, r0
++	jsr	pc, puts
++	halt
++	br	error
++
++puts:
++	tstb	@$XCSR
++	bpl	puts
++	movb	(r0)+, r1
++	beq	1f
++	mov	r1, @$XBUF
++	br	puts
++1:	rts	pc
++
++msg:	.asciz	"\r\nLoading Fuzix..."
++crlf:	.asciz	"\r\n"
++errmsg:	.asciz	"\r\nRL11 error\r\n"
++	.even
++curcyl:	.word	0
+diff --git a/Kernel/platform/platform-pdp11/devices.c b/Kernel/platform/platform-pdp11/devices.c
+index 9b8a4328d..5a2dc6ca1 100644
+--- a/Kernel/platform/platform-pdp11/devices.c
++++ b/Kernel/platform/platform-pdp11/devices.c
+@@ -5,6 +5,7 @@
+ #include <tty.h>
+ #include <vt.h>
+ #include <dev_rl.h>
++#include <devtty.h>
+ 
+ struct devsw dev_tab[] =  /* The device driver switch table */
+ {
+@@ -15,7 +16,7 @@ struct devsw dev_tab[] =  /* The device driver switch table */
+   /* 1: /dev/fd		(absent) */
+   {  nxio_open,     no_close,    no_rdwr,   no_rdwr,   no_ioctl },
+   /* 2: /dev/tty	TTY devices */
+-  {  tty_open,     tty_close,   tty_read,  tty_write,  tty_ioctl },
++  {  pdp_tty_open,     tty_close,   tty_read,  tty_write,  tty_ioctl },
+   /* 3: /dev/lpr	Printer devices */
+   {  no_open,     no_close,   no_rdwr,   no_rdwr,  no_ioctl  },
+   /* 4: /dev/mem etc	System devices (one offs) */
+diff --git a/Kernel/platform/platform-pdp11/devtty.c b/Kernel/platform/platform-pdp11/devtty.c
+index fdeed35d0..24da46610 100644
+--- a/Kernel/platform/platform-pdp11/devtty.c
++++ b/Kernel/platform/platform-pdp11/devtty.c
+@@ -25,6 +25,25 @@ static unsigned char tbuf1[TTYSIZ];
+ static unsigned char tbuf2[TTYSIZ];
+ static uint8_t sleeping;
+ 
++/* Set by program_vectors: 1 if the second DL11 at 176500 answered */
++extern uint16_t tty2_present;
++/* Set by init_hardware: 1 if the KW11-L register at 177546 answered */
++extern uint16_t kw11_present;
++
++static int tty_absent(uint8_t minor)
++{
++	return minor == 2 && !tty2_present;
++}
++
++int pdp_tty_open(uint_fast8_t minor, uint16_t flag)
++{
++	if (tty_absent(minor)) {
++		udata.u_error = ENODEV;
++		return -1;
++	}
++	return tty_open(minor, flag);
++}
++
+ tcflag_t termios_mask[NUM_DEV_TTY + 1] = {
+ 	0,
+ 	_CSYS,
+@@ -47,6 +66,8 @@ void kputchar(uint_fast8_t c)
+ 
+ ttyready_t tty_writeready(uint8_t minor)
+ {
++	if (tty_absent(minor))
++		return TTY_READY_NOW;
+ 	if (XCSR(minor) & 0x80)
+ 		return TTY_READY_NOW;
+ 	return TTY_READY_SOON;
+@@ -59,6 +80,8 @@ void tty_putc(uint8_t minor, unsigned char c)
+ 	   its READY poll in interrupt context (the echo path), so the
+ 	   pacing has to live here.  READY clears in the same cycle as
+ 	   the XBUF write, so this spin is race-free. */
++	if (tty_absent(minor))
++		return;
+ 	while (!(XCSR(minor) & 0x80));
+ 	XBUF(minor) = c;
+ }
+@@ -89,7 +112,7 @@ void tty_rx_interrupt(void)
+ {
+ 	uint8_t minor;
+ 	for (minor = 1; minor <= NUM_DEV_TTY; minor++)
+-		while (RCSR(minor) & 0x80)
++		while (!tty_absent(minor) && (RCSR(minor) & 0x80))
+ 			tty_inproc(minor, RBUF(minor));
+ }
+ 
+@@ -98,6 +121,8 @@ void tty_interrupt(void)
+ {
+ 	uint8_t minor;
+ 	for (minor = 1; minor <= NUM_DEV_TTY; minor++) {
++		if (tty_absent(minor))
++			continue;
+ 		if ((sleeping & (1 << minor)) && (XCSR(minor) & 0x80)) {
+ 			tty_outproc(minor);
+ 			sleeping &= ~(1 << minor);
+@@ -112,7 +137,8 @@ void plt_interrupt(void)
+ 	   with edge-detected pending in trap_ctrl — without this
+ 	   write the line never falls and only ONE clock interrupt
+ 	   is ever delivered. */
+-	*(volatile uint16_t *)0177546 = 0x40;
++	if (kw11_present)
++		*(volatile uint16_t *)0177546 = 0x40;
+ 	timer_interrupt();
+ 	tty_interrupt();
+ }
+diff --git a/Kernel/platform/platform-pdp11/devtty.h b/Kernel/platform/platform-pdp11/devtty.h
+index 14c28c317..3c1b69f68 100644
+--- a/Kernel/platform/platform-pdp11/devtty.h
++++ b/Kernel/platform/platform-pdp11/devtty.h
+@@ -7,4 +7,5 @@ extern uint8_t keymap[8];
+ extern uint8_t keyboard[8][7];
+ extern uint8_t shiftkeyboard[8][7];
+ 
++int pdp_tty_open(uint_fast8_t minor, uint16_t flag);
+ #endif
+diff --git a/Kernel/platform/platform-pdp11/init.c b/Kernel/platform/platform-pdp11/init.c
+index 3bc4a35c0..2cc0d4103 100644
+--- a/Kernel/platform/platform-pdp11/init.c
++++ b/Kernel/platform/platform-pdp11/init.c
+@@ -76,12 +76,18 @@ int main(int argc, char **argv)
+ 	dup(0);				/* fd 1 = stdout */
+ 	dup(0);				/* fd 2 = stderr */
+ 
+-	for (t = 0; t < NTTY; t++)
+-		ttypid[t] = -1;
++	/* A terminal that cannot be opened (no second DL11) is
++	   marked -2 and never gets a shell. */
++	for (t = 0; t < NTTY; t++) {
++		int fd = open(ttydev[t], O_RDWR | O_NOCTTY);
++		ttypid[t] = fd < 0 ? -2 : -1;
++		if (fd >= 0)
++			close(fd);
++	}
+ 
+ 	for (;;) {
+ 		for (t = 0; t < NTTY; t++)
+-			if (ttypid[t] < 0)
++			if (ttypid[t] == -1)
+ 				spawn(t);
+ 		pid = wait(&status);
+ 		if (pid < 0)
+diff --git a/Kernel/platform/platform-pdp11/main.c b/Kernel/platform/platform-pdp11/main.c
+index b6964d671..dc0552a5e 100644
+--- a/Kernel/platform/platform-pdp11/main.c
++++ b/Kernel/platform/platform-pdp11/main.c
+@@ -84,6 +84,9 @@ void plt_usermmu(void)
+  * or 0 if there is nothing to run after all.  Kill paths never
+  * return.
+  */
++extern uint16_t get_usp(void);
++extern void set_usp(uint16_t);
++
+ uint16_t sig_deliver(uint16_t upc, uint16_t upsw, uint16_t ur0, uint16_t ur1)
+ {
+ 	uint_fast8_t sig = udata.u_cursig;
+@@ -116,12 +119,12 @@ uint16_t sig_deliver(uint16_t upc, uint16_t upsw, uint16_t ur0, uint16_t ur1)
+ 	frame[3] = ur0;
+ 	frame[4] = upc;			/* rtt pops these two */
+ 	frame[5] = upsw;
+-	usp = *(volatile uint16_t *)0177716 - 12;	/* mem-mapped USP */
++	usp = get_usp() - 12;
+ 	/* uput windows through KIPAR5 and validates the range; a
+ 	   trashed user SP fails validation and the process dies here
+ 	   rather than scribbling on the other bank. */
+ 	if (uput(frame, (void *)usp, 12))
+ 		doexit(dump_core(SIGKILL));
+-	*(volatile uint16_t *)0177716 = usp;
++	set_usp(usp);
+ 	return (uint16_t)(arg_t)vec;
+ }
+diff --git a/Kernel/platform/platform-pdp11/pdp11.S b/Kernel/platform/platform-pdp11/pdp11.S
+index 708f33cf6..a8733b2df 100644
+--- a/Kernel/platform/platform-pdp11/pdp11.S
++++ b/Kernel/platform/platform-pdp11/pdp11.S
+@@ -41,12 +41,31 @@ init_hardware:
+ 	   space each (VA 0x2000-0xCDFF) */
+ 	mov $128,_ramsize
+ 	mov $43,_procmem
+-	/* KW11-L: enable interrupt, 60Hz line clock, vector 0100, BR6 */
+-	mov $0x40,0177546	/* bit 6 = interrupt enable */
++	/* KW11-L: enable interrupt, 60Hz line clock, vector 0100, BR6.
++	   An 11/23 without a KW11-L board has no register at 177546:
++	   its clock interrupt comes from the backplane (BEVENT) and
++	   cannot be switched off.  Probe, and remember the answer. */
++	mov *$4,-(sp)
++	mov *$6,-(sp)
++	mov $kw_nx,*$4
++	mov $0340,*$6
++	mov $1,_kw11_present
++	mov $0x40,*$0177546	/* bit 6 = interrupt enable */
++	mov (sp)+,*$6
++	mov (sp)+,*$4
+ 	/* DL11: polling mode (RX interrupt disabled until vectors ready) */
+ 	clr 0177560
+ 	rts pc
+ 
++kw_nx:
++	clr _kw11_present
++	rti
++
++	.globl _kw11_present
++	.data
++_kw11_present:	.word 0
++	.text
++
+ /*
+  * map_init — Set up PDP-11/40 MMU for kernel/user mode separation.
+  *
+@@ -234,10 +253,25 @@ _program_vectors:
+ 	   We are still at PSW pri 7 here, so nothing fires until the
+ 	   kernel drops priority. */
+ 	mov $0x40,0177560	/* console RCSR bit 6 = IE */
+-	mov $0x40,0176500	/* tty2 RCSR bit 6 = IE */
++
++	/* The second DL11 is optional: probe it with the bus error
++	   vector pointing at probe_nx, which clears _tty2_present. */
++	mov $probe_nx,*$4
++	mov $1,_tty2_present
++	mov $0x40,*$0176500	/* tty2 RCSR bit 6 = IE */
++	mov $trap_bus,*$4
+ 
+ 	rts pc
+ 
++probe_nx:
++	clr _tty2_present
++	rti
++
++	.globl _tty2_present
++	.data
++_tty2_present:	.word 0
++	.text
++
+ /*
+  * Interrupt entry: KW11-L line clock (vector 0100)
+  *
+@@ -617,7 +651,8 @@ eis_emu:
+ 	   always worked and this hid until stdio's buffer-size MUL. */
+ 	bit $0140000,eflags	/* trapped PSW mode bits [15:14] */
+ 	beq eis_ksp		/* 00 = kernel: R6 was right */
+-	mov *$0177716,(r0)	/* user trap: decode reg6 = user SP */
++	PUSH_USP		/* user trap: decode reg6 = user SP */
++	mov (sp)+,(r0)
+ eis_ksp:
+ 
+ 	/* Fetch faulting opcode (through the user window if needed) */
+@@ -753,7 +788,8 @@ eis_ret:
+ 	   kernel-mode trap esav[6] IS the working SP, mods included. */
+ 	bit $0140000,eflags
+ 	beq eis_rk
+-	mov esav+12,*$0177716
++	mov esav+12,-(sp)
++	POP_USP
+ 	mov ksp,sp
+ 	br eis_rf
+ eis_rk:
+diff --git a/Kernel/platform/platform-pdp11/tricks.S b/Kernel/platform/platform-pdp11/tricks.S
+index 8f958cb74..2def25b99 100644
+--- a/Kernel/platform/platform-pdp11/tricks.S
++++ b/Kernel/platform/platform-pdp11/tricks.S
+@@ -34,7 +34,7 @@ _plt_switchout:
+ 	mov r2,-(sp)
+ 	mov r1,-(sp)
+ #ifndef CONFIG_PDP11_04
+-	mov *$0177716,-(sp)	/* push user SP (USP reg; no MFPI on this CPU) */
++	PUSH_USP
+ #endif
+ 	mov sp,_udata+U_DATA__U_SP
+ 
+@@ -72,7 +72,7 @@ _preempt_switchout:
+ 	mov r2,-(sp)
+ 	mov r1,-(sp)
+ #ifndef CONFIG_PDP11_04
+-	mov *$0177716,-(sp)	/* user SP (memory-mapped USP) */
++	PUSH_USP
+ #endif
+ 	mov sp,_udata+U_DATA__U_SP
+ 
+@@ -181,7 +181,7 @@ owned:
+ 	clr _runticks
+ 	mov _udata+U_DATA__U_SP,sp
+ #ifndef CONFIG_PDP11_04
+-	mov (sp)+,*$0177716	/* pop user SP (USP reg; no MTPI on this CPU) */
++	POP_USP
+ #endif
+ 	mov (sp)+,r1
+ 	mov (sp)+,r2
+@@ -219,7 +219,7 @@ _dofork:
+ 	mov r2,-(sp)
+ 	mov r1,-(sp)
+ #ifndef CONFIG_PDP11_04
+-	mov *$0177716,-(sp)	/* push user SP (USP reg; no MFPI on this CPU) */
++	PUSH_USP
+ #endif
+ 	mov sp,_udata+U_DATA__U_SP
+ 
+@@ -375,3 +375,15 @@ badswitchmsg:
+ 	   safe headroom now. */
+ 	.= .+512
+ swapstack:
++
++/* uint16_t get_usp(void), void set_usp(uint16_t): the user mode SP */
++	.globl _get_usp
++	.globl _set_usp
++_get_usp:
++	PUSH_USP
++	mov (sp)+,r0
++	rts pc
++_set_usp:
++	mov 2(sp),-(sp)
++	POP_USP
++	rts pc
+diff --git a/Standalone/ucp.c b/Standalone/ucp.c
+index fffbf94cb..5da4bb400 100644
+--- a/Standalone/ucp.c
++++ b/Standalone/ucp.c
+@@ -26,7 +26,7 @@ HP
+ 
+ static int16_t *syserror = (int16_t *) & udata.u_error;
+ static char cwd[100];
+-static char line[128];
++static char line[1024];
+ static char *nextline = NULL;
+ static char *month[] = { "Jan", "Feb", "Mar", "Apr",
+ 	"May", "Jun", "Jul", "Aug",
+@@ -72,7 +72,7 @@ static void cmdusage(void)
+ int main(int argc, char *argval[])
+ {
+ 	int rdev;
+-	char cmd[30], arg1[1024], arg2[30], arg3[30];
++	char cmd[30], arg1[1024], arg2[256], arg3[256];
+ 	int count;
+ 	int multiline;
+ 	int pending_line = 0;
+@@ -118,7 +118,7 @@ int main(int argc, char *argval[])
+ 		if (multiline && !pending_line) {
+ 			if (interactive)
+ 				printf("ucp: ");
+-			if (fgets(line, 128, stdin) == NULL) {
++			if (fgets(line, sizeof line, stdin) == NULL) {
+ 				xfs_end();
+ 				exit(retc);
+ 			}
+-- 
+2.56.0
+

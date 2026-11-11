@@ -1,0 +1,28 @@
+From aa1580b95471b37ec96334128cd21fbbee711116 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 23:00:58 -0600
+Subject: [PATCH 13/13] pdp11dec: .gitignore
+
+---
+ Kernel/platform/platform-pdp11dec/.gitignore | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+ create mode 100644 Kernel/platform/platform-pdp11dec/.gitignore
+
+diff --git a/Kernel/platform/platform-pdp11dec/.gitignore b/Kernel/platform/platform-pdp11dec/.gitignore
+new file mode 100644
+index 000000000..cc5387fbb
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/.gitignore
+@@ -0,0 +1,9 @@
++# Build artifacts (root level only, not demo/)
++/fuzix.aout
++/fuzix.bin
++/fuzix_rl02.dsk
++/fuzix_rl02_sd.dsk
++/fuzix_rootfs.img
++/boot_fuzix.hex
++/build/
++*.o
+-- 
+2.56.0
+

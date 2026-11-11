@@ -1,0 +1,1368 @@
+From 17a7444048f0f69362f01159801cd1ebc8fd5aa5 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 23:00:47 -0600
+Subject: [PATCH 12/13] net: 32 bit socket ring offsets (sockets 4+ broke), no
+ unhook of open sockets, links released once, uIP userrequest cleared; ping:
+ unsigned checksum bytes; signals 16-31 exit with their own number; pdp11dec:
+ one terminal, 14 processes; netd: SIGUSR1 dumps links
+
+---
+ Applications/netd/netd.c                     | 80 +++++++++++++++++---
+ Applications/netd/ping.c                     |  7 +-
+ Applications/netd/uip.c                      |  4 +
+ Kernel/dev/net/net_native.c                  | 21 +++--
+ Kernel/platform/platform-pdp11dec/config.h   |  6 +-
+ Kernel/platform/platform-pdp11dec/devtty.c   |  8 ++
+ Kernel/process.c                             |  2 +-
+ Library/libs/fuzixpdp11/syscall___netcall.s  |  1 +
+ Library/libs/fuzixpdp11/syscall__alarm.s     |  1 +
+ Library/libs/fuzixpdp11/syscall__exit.s      |  1 +
+ Library/libs/fuzixpdp11/syscall__fork.s      |  1 +
+ Library/libs/fuzixpdp11/syscall__fstat.s     |  1 +
+ Library/libs/fuzixpdp11/syscall__ftruncate.s |  1 +
+ Library/libs/fuzixpdp11/syscall__getdirent.s |  1 +
+ Library/libs/fuzixpdp11/syscall__lseek.s     |  1 +
+ Library/libs/fuzixpdp11/syscall__nosys68.s   |  1 +
+ Library/libs/fuzixpdp11/syscall__nosys69.s   |  1 +
+ Library/libs/fuzixpdp11/syscall__nosys70.s   |  1 +
+ Library/libs/fuzixpdp11/syscall__nosys71.s   |  1 +
+ Library/libs/fuzixpdp11/syscall__pause.s     |  1 +
+ Library/libs/fuzixpdp11/syscall__profil.s    |  1 +
+ Library/libs/fuzixpdp11/syscall__select.s    |  1 +
+ Library/libs/fuzixpdp11/syscall__sigdisp.s   |  1 +
+ Library/libs/fuzixpdp11/syscall__stat.s      |  1 +
+ Library/libs/fuzixpdp11/syscall__statfs.s    |  1 +
+ Library/libs/fuzixpdp11/syscall__stime.s     |  1 +
+ Library/libs/fuzixpdp11/syscall__time.s      |  1 +
+ Library/libs/fuzixpdp11/syscall__umount.s    |  1 +
+ Library/libs/fuzixpdp11/syscall__uname.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_access.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_acct.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_brk.s        |  1 +
+ Library/libs/fuzixpdp11/syscall_chdir.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_chmod.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_chown.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_chroot.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_close.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_dup.s        |  1 +
+ Library/libs/fuzixpdp11/syscall_dup2.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_execve.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_fchdir.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_fchmod.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_fchown.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_fcntl.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_flock.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_getegid.s    |  1 +
+ Library/libs/fuzixpdp11/syscall_geteuid.s    |  1 +
+ Library/libs/fuzixpdp11/syscall_getgid.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_getgroups.s  |  1 +
+ Library/libs/fuzixpdp11/syscall_getpgrp.s    |  1 +
+ Library/libs/fuzixpdp11/syscall_getpid.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_getppid.s    |  1 +
+ Library/libs/fuzixpdp11/syscall_getrlimit.s  |  1 +
+ Library/libs/fuzixpdp11/syscall_getsid.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_getuid.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_ioctl.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_kill.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_link.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_memalloc.s   |  1 +
+ Library/libs/fuzixpdp11/syscall_memfree.s    |  1 +
+ Library/libs/fuzixpdp11/syscall_mkdir.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_mknod.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_mount.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_nice.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_open.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_pipe.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_read.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_rename.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_rmdir.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_sbrk.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_setgid.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_setgroups.s  |  1 +
+ Library/libs/fuzixpdp11/syscall_setpgid.s    |  1 +
+ Library/libs/fuzixpdp11/syscall_setpgrp.s    |  1 +
+ Library/libs/fuzixpdp11/syscall_setrlimit.s  |  1 +
+ Library/libs/fuzixpdp11/syscall_setsid.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_setuid.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_signal.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_sync.s       |  1 +
+ Library/libs/fuzixpdp11/syscall_times.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_uadmin.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_umask.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_unlink.s     |  1 +
+ Library/libs/fuzixpdp11/syscall_utime.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_waitpid.s    |  1 +
+ Library/libs/fuzixpdp11/syscall_write.s      |  1 +
+ Library/libs/fuzixpdp11/syscall_yield.s      |  1 +
+ 87 files changed, 187 insertions(+), 21 deletions(-)
+
+diff --git a/Applications/netd/netd.c b/Applications/netd/netd.c
+index 359cfacf8..c764ea8b9 100644
+--- a/Applications/netd/netd.c
++++ b/Applications/netd/netd.c
+@@ -111,14 +111,24 @@ void ksende( int event)
+ /* allocate a connection linkage */
+ int get_map( void )
+ {
+-	int new = freelist[ --freeptr ];
++	int new;
++	if (freeptr == 0)
++		return -1;
++	new = freelist[ --freeptr ];
+ 	memset( &map[new], 0, sizeof( map[new] ) );
+ 	return new;
+ }
+ 
+-/* release a linkage */
++/* release a linkage (once: a second release would hand the same link
++   to two sockets) */
+ void rel_map( int n )
+ {
++	int i;
++	if (n < 0 || n >= NSOCKET)
++		return;
++	for (i = 0; i < freeptr; i++)
++		if (freelist[i] == n)
++			return;
+ 	freelist[ freeptr++ ] = n;
+ }
+ 
+@@ -126,6 +136,11 @@ void rel_map( int n )
+ void unhook_and_rel_map(int n)
+ {
+ 	struct link *s = & map[n];
++	/* uIP may call back about this connection while it finishes
++	   closing: those calls must not reach the kernel socket number,
++	   which the next socket may already have */
++	if (s->conn && s->conn->appstate == n)
++		s->conn->appstate = NO_LINK;
+ 	if (s->flags & LINK_UNBIND) {
+ 		if (s->flags & LINK_DEAD) {
+ 			ne.data = SS_DEAD;
+@@ -147,7 +162,7 @@ void init_map( void )
+ /* send or resend tcp data */
+ void send_tcp( struct link *s )
+ {
+-	uint32_t base = s->socketn * RINGSIZ * 2 + RINGSIZ;
++	uint32_t base = (uint32_t)s->socketn * RINGSIZ * 2 + RINGSIZ;
+ 
+ 	if ( ! s->len ) return;
+ #ifdef NETD_RINGBUF_IN_MEMORY
+@@ -164,7 +179,7 @@ void send_tcp( struct link *s )
+ void send_udp( struct link *s )
+ {
+ 	/* Send packet to net */
+-	uint32_t base = s->socketn * RINGSIZ * 2 + RINGSIZ;
++	uint32_t base = (uint32_t)s->socketn * RINGSIZ * 2 + RINGSIZ;
+ 	uint16_t len = s->tsize[s->tstart];
+ 
+ #ifdef NETD_RINGBUF_IN_MEMORY
+@@ -187,7 +202,7 @@ void send_udp( struct link *s )
+ void send_raw( struct link *s )
+ {
+ 	/* Send packet to net */
+-	uint32_t base = s->socketn * RINGSIZ * 2 + RINGSIZ;
++	uint32_t base = (uint32_t)s->socketn * RINGSIZ * 2 + RINGSIZ;
+ 	uint16_t len = s->tsize[s->tstart];
+ 
+ #ifdef NETD_RINGBUF_IN_MEMORY
+@@ -262,7 +277,11 @@ void netd_appcall(void)
+ 	struct link *s;
+ 
+ 	if (uip_conn->appstate == NO_LINK) {
+-		if (!uip_connected() || accept_conn() < 0) {
++		/* a connection nobody owns any more: let uIP finish it */
++		if (!uip_connected())
++			return;
++		/* a new connection on a listening port */
++		if (accept_conn() < 0) {
+ 			uip_abort();
+ 			return;
+ 		}
+@@ -326,7 +345,7 @@ void netd_appcall(void)
+ 		uint16_t len = uip_datalen();
+ 		uint16_t l;
+ 		char *ptr = uip_appdata;
+-		uint32_t base = ne.socket * RINGSIZ * 2;
++		uint32_t base = (uint32_t)ne.socket * RINGSIZ * 2;
+ 		if ( room(s) < len )
+ 			exit_err("RECV OVERFLOW!\n");
+ 		while ( len ){
+@@ -498,7 +517,7 @@ void netd_udp_appcall(void)
+ 		/* there new data in the packet buffer */
+ 		uint16_t len = uip_datalen();
+ 		char *ptr = uip_appdata;
+-		uint32_t base = ne.socket * RINGSIZ * 2;
++		uint32_t base = (uint32_t)ne.socket * RINGSIZ * 2;
+ 
+ 		if ( ((s->rend + 1)&(NSOCKBUF-1)) == s->rstart )
+ 			return; /* full - drop it */
+@@ -567,7 +586,7 @@ void netd_raw_appcall(void)
+ 		/* there new data in the packet buffer */
+ 		uint16_t len = uip_datalen();
+ 		char *ptr = uip_appdata;
+-		uint32_t base = ne.socket * RINGSIZ * 2;
++		uint32_t base = (uint32_t)ne.socket * RINGSIZ * 2;
+ 
+ 		if ( ((s->rend + 1)&(NSOCKBUF-1)) == s->rstart )
+ 			return; /* full - drop it */
+@@ -628,6 +647,12 @@ int dokernel( void )
+ 			switch ( sm.sd.newstate ){
+ 			case SS_UNCONNECTED:
+ 				ne.data = get_map(); /* becomes lcn */
++				if (ne.data == (uint16_t)-1) {	/* all links in use */
++					ne.data = SS_CLOSED;
++					ne.ret = ENOBUFS;
++					ksende( NE_NEWSTATE );
++					break;
++				}
+ 				map[ne.data].len = 0;
+ 				map[ne.data].socketn = sm.s.s_num;
+ 				ksend( NE_INIT );
+@@ -1057,6 +1082,38 @@ int parse_rcfile( void ){
+ 	return 0;
+ }
+ 
++/* kill -USR1 netd: show the links (for debugging) */
++static volatile uint8_t want_dump;
++static void dump_sig(int sig)
++{
++	want_dump = 1;
++	signal(SIGUSR1, dump_sig);
++}
++
++static void dump_links(void)
++{
++	int i;
++	fprintf(stderr, "netd: %d free links:", freeptr);
++	for (i = 0; i < freeptr; i++)
++		fprintf(stderr, " %d", freelist[i]);
++	fprintf(stderr, "\n");
++	for (i = 0; i < NSOCKET; i++)
++		fprintf(stderr, " link %d: flags %x sock %d conn %d port %u t %u-%u r %u-%u\n",
++			i, map[i].flags, map[i].socketn,
++			map[i].conn ? (int)(map[i].conn - uip_conns) : -1,
++			UIP_HTONS(map[i].port), map[i].tstart, map[i].tend,
++			map[i].rstart, map[i].rend);
++	for (i = 0; i < UIP_CONNS; i++)
++		if (uip_conns[i].tcpstateflags != UIP_CLOSED)
++			fprintf(stderr, " tcp %d: state %d app %d lport %u\n", i,
++				uip_conns[i].tcpstateflags & UIP_TS_MASK,
++				uip_conns[i].appstate, UIP_HTONS(uip_conns[i].lport));
++	for (i = 0; i < UIP_UDP_CONNS; i++)
++		if (uip_udp_conns[i].lport)
++			fprintf(stderr, " udp %d: app %d lport %u\n", i,
++				uip_udp_conns[i].appstate, UIP_HTONS(uip_udp_conns[i].lport));
++}
++
+ void cleanup(int sig)
+ {
+ #ifndef NETD_RINGBUF_IN_MEMORY
+@@ -1166,9 +1223,14 @@ int main( int argc, char *argv[] )
+ 		signal(SIGINT, SIG_IGN);
+ 	}
+ 
++	signal(SIGUSR1, dump_sig);
+ 	while(1) {
+ 		int a,b;
+ 		static uint8_t idle;
++		if (want_dump) {
++			want_dump = 0;
++			dump_links();
++		}
+ 		a = dokernel();
+ 		b = douip();
+ 		/* FIXME: we should probably run blocking on the /dev/net
+diff --git a/Applications/netd/ping.c b/Applications/netd/ping.c
+index c34c8a1b7..6f596e9db 100644
+--- a/Applications/netd/ping.c
++++ b/Applications/netd/ping.c
+@@ -67,16 +67,17 @@ void int_handler( int signum ){
+ 
+ /* print a IP address */
+ void ipprint( uint32_t *a ){
+-    char *b = (char *)a;
++    uint8_t *b = (uint8_t *)(char *)a;
+     printf("%d.%d.%d.%d", b[0], b[1], b[2], b[3] );
+ }
+ 
+ 
+ /* returns inet chksum */
+-uint16_t cksum( char *b, int len ){
++uint16_t cksum( char *cb, int len ){
+     uint16_t sum = 0;
+     uint16_t t;
+-    char *e = b + len;
++    uint8_t *b = (uint8_t *)cb;	/* char is signed here: 0x80 and up */
++    uint8_t *e = b + len;
+     b[len] = 0;
+     while(b < e){
+ 	t = (b[0] << 8) + b[1];
+diff --git a/Applications/netd/uip.c b/Applications/netd/uip.c
+index 793baf268..09df898cf 100644
+--- a/Applications/netd/uip.c
++++ b/Applications/netd/uip.c
+@@ -742,6 +742,10 @@ uip_process(uint8_t flag)
+      particular connection. */
+   if(flag == UIP_POLL_REQUEST) {
+     if(uip_connr->userrequest) {
++	/* one poke per request: left set, every poll would go through
++	   appsend, which resets nrtx, and a closing connection would
++	   never time out */
++	uip_connr->userrequest = 0;
+ 	uip_flags = UIP_POLL;
+ 	UIP_APPCALL();
+ 	goto appsend;
+diff --git a/Kernel/dev/net/net_native.c b/Kernel/dev/net/net_native.c
+index 9e55902eb..48e6f6972 100644
+--- a/Kernel/dev/net/net_native.c
++++ b/Kernel/dev/net/net_native.c
+@@ -86,6 +86,10 @@ int netdev_write(uint8_t flags)
+ 	}
+ 
+ 	s = sockets + ne.socket;
++	/* The daemon can still be telling us about a socket that has gone
++	   (its s_num is then -1: sockdata + 255 is someone else's memory) */
++	if (s->s_state == SS_UNUSED || s->s_num != ne.socket)
++		return udata.u_count;
+ 	sd = sockdata + s->s_num;
+ 	switch (ne.event) {
+ 		/* Initialize a new socket */
+@@ -155,6 +159,11 @@ int netdev_write(uint8_t flags)
+ 		wakeup_all(s);
+ 		break;
+ 	case NE_UNHOOK:
++		/* Only a socket nobody has open any more can go: a late or
++		   repeated unhook must not free a live socket that now has
++		   this number */
++		if (s->s_ino)
++			break;
+ 		s->s_state = ne.data;
+ 		if (s->s_state == SS_DEAD){
+ 			sd->event = 0;
+@@ -533,13 +542,13 @@ uint16_t netn_putbuf(struct socket *s)
+ 		return 0;
+ #ifdef CONFIG_FLAT
+ 	if (bmem)
+-		ubase_to_bmem(bmem + (s->s_num * SOCKBUFOFF + RXBUFOFF +
++		ubase_to_bmem(bmem + ((uint32_t)s->s_num * SOCKBUFOFF + RXBUFOFF +
+ 			sd->tnext * TXPKTSIZ), udata.u_count - udata.u_done);
+ #endif
+ 	if (net_ino) {
+ 		udata.u_sysio = false;
+ 		udata.u_offset =
+-			s->s_num * SOCKBUFOFF + RXBUFOFF + sd->tnext * TXPKTSIZ;
++			(uint32_t)s->s_num * SOCKBUFOFF + RXBUFOFF + sd->tnext * TXPKTSIZ;
+ 		/* the slot being filled is tnext (tbuf is the daemon's) */
+ 		/* FIXME: check writei returns and readi returns properly */
+ 		writei(net_ino, 0);
+@@ -567,12 +576,12 @@ uint16_t netn_getbuf(struct socket *s)
+ 		return 0;
+ #ifdef CONFIG_FLAT
+ 	if (bmem)
+-		bmem_to_ubase(bmem + (s->s_num * SOCKBUFOFF +
++		bmem_to_ubase(bmem + ((uint32_t)s->s_num * SOCKBUFOFF +
+ 			sd->rbuf * RXPKTSIZ), udata.u_count - udata.u_done);
+ #endif
+ 	if (net_ino) {
+ 		udata.u_sysio = false;
+-		udata.u_offset = s->s_num * SOCKBUFOFF + sd->rbuf * RXPKTSIZ;
++		udata.u_offset = (uint32_t)s->s_num * SOCKBUFOFF + sd->rbuf * RXPKTSIZ;
+ 		udata.u_count = min(udata.u_count, sd->rlen[sd->rbuf]);
+ 		/* FIXME: check writei returns and readi returns properly */
+ 		readi(net_ino, 0);
+@@ -610,7 +619,7 @@ uint16_t netn_queuebytes(struct socket *s)
+ 	c -= 1;
+ 	if( len > c ) len = c;
+ 
+-	base = s->s_num * SOCKBUFOFF + RXBUFOFF;
++	base = (uint32_t)s->s_num * SOCKBUFOFF + RXBUFOFF;
+ 	op = writei;
+ 	r = ringbop();
+ 	sd->tnext = sptr;
+@@ -641,7 +650,7 @@ uint16_t netn_copyout(struct socket *s)
+ 	eptr = sd->rnext;
+ 	if( sptr == eptr )
+ 	    return 0;
+-	base = s->s_num * SOCKBUFOFF;
++	base = (uint32_t)s->s_num * SOCKBUFOFF;
+ 	op = readi;
+ 	r = ringbop();
+ 	sd->rbuf = sptr;
+diff --git a/Kernel/platform/platform-pdp11dec/config.h b/Kernel/platform/platform-pdp11dec/config.h
+index 3969a44f9..67a5ee9cb 100644
+--- a/Kernel/platform/platform-pdp11dec/config.h
++++ b/Kernel/platform/platform-pdp11dec/config.h
+@@ -37,7 +37,7 @@
+ #define BANK_CLICKS	0x2C0		/* 44 KB in 64 byte clicks */
+ #define BANK0_CLICK	0x300		/* first bank at physical 0xC000 */
+ 
+-#define PTABSIZE	12
++#define PTABSIZE	14
+ #define ITABSIZE	20	/* In-core inodes */
+ #define OFTSIZE		20	/* Open file table */
+ 
+@@ -70,7 +70,9 @@
+ #define CMDLINE	NULL	  /* Location of root dev name */
+ 
+ /* Device parameters */
+-#define NUM_DEV_TTY 2
++/* One terminal, the console DL11 at 177560 (more sessions: telnet).
++   2 adds a second DL11 at 176500, if there is one, for /dev/tty2. */
++#define NUM_DEV_TTY 1
+ #define TTYDEV   BOOT_TTY /* Device used by kernel for messages, panics */
+ #define NBUFS    4        /* Number of block buffers */
+ #define NMOUNTS	 1	  /* Number of mounts at a time */
+diff --git a/Kernel/platform/platform-pdp11dec/devtty.c b/Kernel/platform/platform-pdp11dec/devtty.c
+index 24da46610..e272a6962 100644
+--- a/Kernel/platform/platform-pdp11dec/devtty.c
++++ b/Kernel/platform/platform-pdp11dec/devtty.c
+@@ -11,7 +11,9 @@
+ static const uint16_t ttybase[NUM_DEV_TTY + 1] = {
+ 	0,
+ 	0177560,
++#if NUM_DEV_TTY > 1
+ 	0176500
++#endif
+ };
+ 
+ /* Status registers are read as words to avoid the GCC pdp11 ASH
+@@ -22,7 +24,9 @@ static const uint16_t ttybase[NUM_DEV_TTY + 1] = {
+ #define XBUF(m)  (*(volatile uint8_t *)(ttybase[m] + 6))
+ 
+ static unsigned char tbuf1[TTYSIZ];
++#if NUM_DEV_TTY > 1
+ static unsigned char tbuf2[TTYSIZ];
++#endif
+ static uint8_t sleeping;
+ 
+ /* Set by program_vectors: 1 if the second DL11 at 176500 answered */
+@@ -47,13 +51,17 @@ int pdp_tty_open(uint_fast8_t minor, uint16_t flag)
+ tcflag_t termios_mask[NUM_DEV_TTY + 1] = {
+ 	0,
+ 	_CSYS,
++#if NUM_DEV_TTY > 1
+ 	_CSYS
++#endif
+ };
+ 
+ struct s_queue ttyinq[NUM_DEV_TTY + 1] = {	/* ttyinq[0] is never used */
+ 	{NULL, NULL, NULL, 0, 0, 0},
+ 	{tbuf1, tbuf1, tbuf1, TTYSIZ, 0, TTYSIZ / 2},
++#if NUM_DEV_TTY > 1
+ 	{tbuf2, tbuf2, tbuf2, TTYSIZ, 0, TTYSIZ / 2},
++#endif
+ };
+ 
+ /* Output for the system console (kprintf etc) */
+diff --git a/Kernel/process.c b/Kernel/process.c
+index c4b338913..8ed29ad1c 100644
+--- a/Kernel/process.c
++++ b/Kernel/process.c
+@@ -741,7 +741,7 @@ static uint_fast8_t chksigset(struct sigbits *sb, uint_fast8_t b)
+ 				udata.u_ptab->p_status = P_RUNNING;
+ 				nready++;
+ 			}
+-			doexit(dump_core(j));
++			doexit(dump_core(j + (b << 4)));	/* the signal number */
+ 		} else if (*svec != SIG_IGN) {
+ 			/* Arrange to call the user routine at return */
+ 			sb->s_pending &= ~m;	// unset the bit
+diff --git a/Library/libs/fuzixpdp11/syscall___netcall.s b/Library/libs/fuzixpdp11/syscall___netcall.s
+index c5db8e977..c782502c7 100644
+--- a/Library/libs/fuzixpdp11/syscall___netcall.s
++++ b/Library/libs/fuzixpdp11/syscall___netcall.s
+@@ -9,5 +9,6 @@ ___netcall:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__alarm.s b/Library/libs/fuzixpdp11/syscall__alarm.s
+index 6c99e0048..e2c7e03f6 100644
+--- a/Library/libs/fuzixpdp11/syscall__alarm.s
++++ b/Library/libs/fuzixpdp11/syscall__alarm.s
+@@ -9,5 +9,6 @@ __alarm:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__exit.s b/Library/libs/fuzixpdp11/syscall__exit.s
+index fe3da6d94..8e3e63531 100644
+--- a/Library/libs/fuzixpdp11/syscall__exit.s
++++ b/Library/libs/fuzixpdp11/syscall__exit.s
+@@ -9,5 +9,6 @@ __exit:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__fork.s b/Library/libs/fuzixpdp11/syscall__fork.s
+index 1369dcdd3..06e70bf3d 100644
+--- a/Library/libs/fuzixpdp11/syscall__fork.s
++++ b/Library/libs/fuzixpdp11/syscall__fork.s
+@@ -10,5 +10,6 @@ __fork:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__fstat.s b/Library/libs/fuzixpdp11/syscall__fstat.s
+index e481949ed..441ce9d93 100644
+--- a/Library/libs/fuzixpdp11/syscall__fstat.s
++++ b/Library/libs/fuzixpdp11/syscall__fstat.s
+@@ -10,5 +10,6 @@ __fstat:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__ftruncate.s b/Library/libs/fuzixpdp11/syscall__ftruncate.s
+index 9f2e3aceb..4e06237b4 100644
+--- a/Library/libs/fuzixpdp11/syscall__ftruncate.s
++++ b/Library/libs/fuzixpdp11/syscall__ftruncate.s
+@@ -10,5 +10,6 @@ __ftruncate:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__getdirent.s b/Library/libs/fuzixpdp11/syscall__getdirent.s
+index 061a56c40..f47a2645a 100644
+--- a/Library/libs/fuzixpdp11/syscall__getdirent.s
++++ b/Library/libs/fuzixpdp11/syscall__getdirent.s
+@@ -12,6 +12,7 @@ __getdirent:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__lseek.s b/Library/libs/fuzixpdp11/syscall__lseek.s
+index 2f36741f3..fddcefdc2 100644
+--- a/Library/libs/fuzixpdp11/syscall__lseek.s
++++ b/Library/libs/fuzixpdp11/syscall__lseek.s
+@@ -12,6 +12,7 @@ __lseek:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__nosys68.s b/Library/libs/fuzixpdp11/syscall__nosys68.s
+index e5d9b8e44..fa9b32b9a 100644
+--- a/Library/libs/fuzixpdp11/syscall__nosys68.s
++++ b/Library/libs/fuzixpdp11/syscall__nosys68.s
+@@ -8,5 +8,6 @@ __nosys68:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__nosys69.s b/Library/libs/fuzixpdp11/syscall__nosys69.s
+index e7732c9e1..586842260 100644
+--- a/Library/libs/fuzixpdp11/syscall__nosys69.s
++++ b/Library/libs/fuzixpdp11/syscall__nosys69.s
+@@ -8,5 +8,6 @@ __nosys69:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__nosys70.s b/Library/libs/fuzixpdp11/syscall__nosys70.s
+index 7f874c1a9..7d0bb74cf 100644
+--- a/Library/libs/fuzixpdp11/syscall__nosys70.s
++++ b/Library/libs/fuzixpdp11/syscall__nosys70.s
+@@ -8,5 +8,6 @@ __nosys70:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__nosys71.s b/Library/libs/fuzixpdp11/syscall__nosys71.s
+index 79f9ce13a..b84e78a0e 100644
+--- a/Library/libs/fuzixpdp11/syscall__nosys71.s
++++ b/Library/libs/fuzixpdp11/syscall__nosys71.s
+@@ -8,5 +8,6 @@ __nosys71:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__pause.s b/Library/libs/fuzixpdp11/syscall__pause.s
+index 3507f22c7..5d46dfb4f 100644
+--- a/Library/libs/fuzixpdp11/syscall__pause.s
++++ b/Library/libs/fuzixpdp11/syscall__pause.s
+@@ -9,5 +9,6 @@ __pause:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__profil.s b/Library/libs/fuzixpdp11/syscall__profil.s
+index dc1e84fd2..e83f22076 100644
+--- a/Library/libs/fuzixpdp11/syscall__profil.s
++++ b/Library/libs/fuzixpdp11/syscall__profil.s
+@@ -14,6 +14,7 @@ __profil:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r3
+ 	mov (sp)+, r2
+diff --git a/Library/libs/fuzixpdp11/syscall__select.s b/Library/libs/fuzixpdp11/syscall__select.s
+index f98c58186..a28e20ea7 100644
+--- a/Library/libs/fuzixpdp11/syscall__select.s
++++ b/Library/libs/fuzixpdp11/syscall__select.s
+@@ -10,5 +10,6 @@ __select:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__sigdisp.s b/Library/libs/fuzixpdp11/syscall__sigdisp.s
+index 357c09b4f..fcdedd001 100644
+--- a/Library/libs/fuzixpdp11/syscall__sigdisp.s
++++ b/Library/libs/fuzixpdp11/syscall__sigdisp.s
+@@ -10,5 +10,6 @@ __sigdisp:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__stat.s b/Library/libs/fuzixpdp11/syscall__stat.s
+index 6beedfff1..f5ebb5cfe 100644
+--- a/Library/libs/fuzixpdp11/syscall__stat.s
++++ b/Library/libs/fuzixpdp11/syscall__stat.s
+@@ -10,5 +10,6 @@ __stat:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__statfs.s b/Library/libs/fuzixpdp11/syscall__statfs.s
+index b3a84c859..fcce05ebe 100644
+--- a/Library/libs/fuzixpdp11/syscall__statfs.s
++++ b/Library/libs/fuzixpdp11/syscall__statfs.s
+@@ -10,5 +10,6 @@ __statfs:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__stime.s b/Library/libs/fuzixpdp11/syscall__stime.s
+index c79877214..15931aaae 100644
+--- a/Library/libs/fuzixpdp11/syscall__stime.s
++++ b/Library/libs/fuzixpdp11/syscall__stime.s
+@@ -10,5 +10,6 @@ __stime:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__time.s b/Library/libs/fuzixpdp11/syscall__time.s
+index 391ddb9a3..0dad59d5f 100644
+--- a/Library/libs/fuzixpdp11/syscall__time.s
++++ b/Library/libs/fuzixpdp11/syscall__time.s
+@@ -10,5 +10,6 @@ __time:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__umount.s b/Library/libs/fuzixpdp11/syscall__umount.s
+index 2c04259a4..18353bd4e 100644
+--- a/Library/libs/fuzixpdp11/syscall__umount.s
++++ b/Library/libs/fuzixpdp11/syscall__umount.s
+@@ -10,5 +10,6 @@ __umount:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall__uname.s b/Library/libs/fuzixpdp11/syscall__uname.s
+index 877cde3a2..90828eea6 100644
+--- a/Library/libs/fuzixpdp11/syscall__uname.s
++++ b/Library/libs/fuzixpdp11/syscall__uname.s
+@@ -10,5 +10,6 @@ __uname:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_access.s b/Library/libs/fuzixpdp11/syscall_access.s
+index 97350bb28..695fbe777 100644
+--- a/Library/libs/fuzixpdp11/syscall_access.s
++++ b/Library/libs/fuzixpdp11/syscall_access.s
+@@ -10,5 +10,6 @@ _access:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_acct.s b/Library/libs/fuzixpdp11/syscall_acct.s
+index 4d988ad17..fc3375a9c 100644
+--- a/Library/libs/fuzixpdp11/syscall_acct.s
++++ b/Library/libs/fuzixpdp11/syscall_acct.s
+@@ -9,5 +9,6 @@ _acct:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_brk.s b/Library/libs/fuzixpdp11/syscall_brk.s
+index 15d94f6d4..846a36fa6 100644
+--- a/Library/libs/fuzixpdp11/syscall_brk.s
++++ b/Library/libs/fuzixpdp11/syscall_brk.s
+@@ -9,5 +9,6 @@ _brk:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_chdir.s b/Library/libs/fuzixpdp11/syscall_chdir.s
+index 4593f3845..5010c63af 100644
+--- a/Library/libs/fuzixpdp11/syscall_chdir.s
++++ b/Library/libs/fuzixpdp11/syscall_chdir.s
+@@ -9,5 +9,6 @@ _chdir:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_chmod.s b/Library/libs/fuzixpdp11/syscall_chmod.s
+index d3844c9f1..5bbeea468 100644
+--- a/Library/libs/fuzixpdp11/syscall_chmod.s
++++ b/Library/libs/fuzixpdp11/syscall_chmod.s
+@@ -10,5 +10,6 @@ _chmod:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_chown.s b/Library/libs/fuzixpdp11/syscall_chown.s
+index 56d85d3df..3034d96af 100644
+--- a/Library/libs/fuzixpdp11/syscall_chown.s
++++ b/Library/libs/fuzixpdp11/syscall_chown.s
+@@ -12,6 +12,7 @@ _chown:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_chroot.s b/Library/libs/fuzixpdp11/syscall_chroot.s
+index 982513506..f3b6e8d99 100644
+--- a/Library/libs/fuzixpdp11/syscall_chroot.s
++++ b/Library/libs/fuzixpdp11/syscall_chroot.s
+@@ -9,5 +9,6 @@ _chroot:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_close.s b/Library/libs/fuzixpdp11/syscall_close.s
+index 36be7ffb9..cdeb75543 100644
+--- a/Library/libs/fuzixpdp11/syscall_close.s
++++ b/Library/libs/fuzixpdp11/syscall_close.s
+@@ -9,5 +9,6 @@ _close:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_dup.s b/Library/libs/fuzixpdp11/syscall_dup.s
+index e5e67f9b8..eec02083d 100644
+--- a/Library/libs/fuzixpdp11/syscall_dup.s
++++ b/Library/libs/fuzixpdp11/syscall_dup.s
+@@ -9,5 +9,6 @@ _dup:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_dup2.s b/Library/libs/fuzixpdp11/syscall_dup2.s
+index 70ff2e443..06d143a5f 100644
+--- a/Library/libs/fuzixpdp11/syscall_dup2.s
++++ b/Library/libs/fuzixpdp11/syscall_dup2.s
+@@ -10,5 +10,6 @@ _dup2:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_execve.s b/Library/libs/fuzixpdp11/syscall_execve.s
+index db6c1f6cb..d1ab2a50e 100644
+--- a/Library/libs/fuzixpdp11/syscall_execve.s
++++ b/Library/libs/fuzixpdp11/syscall_execve.s
+@@ -12,6 +12,7 @@ _execve:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_fchdir.s b/Library/libs/fuzixpdp11/syscall_fchdir.s
+index ebb89c84e..b64109bb3 100644
+--- a/Library/libs/fuzixpdp11/syscall_fchdir.s
++++ b/Library/libs/fuzixpdp11/syscall_fchdir.s
+@@ -9,5 +9,6 @@ _fchdir:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_fchmod.s b/Library/libs/fuzixpdp11/syscall_fchmod.s
+index 63ad73dea..562b35d73 100644
+--- a/Library/libs/fuzixpdp11/syscall_fchmod.s
++++ b/Library/libs/fuzixpdp11/syscall_fchmod.s
+@@ -10,5 +10,6 @@ _fchmod:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_fchown.s b/Library/libs/fuzixpdp11/syscall_fchown.s
+index e2f637412..c341dbd3c 100644
+--- a/Library/libs/fuzixpdp11/syscall_fchown.s
++++ b/Library/libs/fuzixpdp11/syscall_fchown.s
+@@ -12,6 +12,7 @@ _fchown:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_fcntl.s b/Library/libs/fuzixpdp11/syscall_fcntl.s
+index 46f1e1184..03eec0da7 100644
+--- a/Library/libs/fuzixpdp11/syscall_fcntl.s
++++ b/Library/libs/fuzixpdp11/syscall_fcntl.s
+@@ -12,6 +12,7 @@ _fcntl:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_flock.s b/Library/libs/fuzixpdp11/syscall_flock.s
+index 51636fe44..3b723d97b 100644
+--- a/Library/libs/fuzixpdp11/syscall_flock.s
++++ b/Library/libs/fuzixpdp11/syscall_flock.s
+@@ -10,5 +10,6 @@ _flock:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getegid.s b/Library/libs/fuzixpdp11/syscall_getegid.s
+index d2a33aba0..19917e866 100644
+--- a/Library/libs/fuzixpdp11/syscall_getegid.s
++++ b/Library/libs/fuzixpdp11/syscall_getegid.s
+@@ -8,5 +8,6 @@ _getegid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_geteuid.s b/Library/libs/fuzixpdp11/syscall_geteuid.s
+index 924559603..ba6d275c9 100644
+--- a/Library/libs/fuzixpdp11/syscall_geteuid.s
++++ b/Library/libs/fuzixpdp11/syscall_geteuid.s
+@@ -8,5 +8,6 @@ _geteuid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getgid.s b/Library/libs/fuzixpdp11/syscall_getgid.s
+index 3fdb3059b..2a40897ab 100644
+--- a/Library/libs/fuzixpdp11/syscall_getgid.s
++++ b/Library/libs/fuzixpdp11/syscall_getgid.s
+@@ -8,5 +8,6 @@ _getgid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getgroups.s b/Library/libs/fuzixpdp11/syscall_getgroups.s
+index 5d23b5b03..fa61f63aa 100644
+--- a/Library/libs/fuzixpdp11/syscall_getgroups.s
++++ b/Library/libs/fuzixpdp11/syscall_getgroups.s
+@@ -10,5 +10,6 @@ _getgroups:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getpgrp.s b/Library/libs/fuzixpdp11/syscall_getpgrp.s
+index 1e5d7608c..2690817a5 100644
+--- a/Library/libs/fuzixpdp11/syscall_getpgrp.s
++++ b/Library/libs/fuzixpdp11/syscall_getpgrp.s
+@@ -8,5 +8,6 @@ _getpgrp:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getpid.s b/Library/libs/fuzixpdp11/syscall_getpid.s
+index b4985553c..62df54451 100644
+--- a/Library/libs/fuzixpdp11/syscall_getpid.s
++++ b/Library/libs/fuzixpdp11/syscall_getpid.s
+@@ -8,5 +8,6 @@ _getpid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getppid.s b/Library/libs/fuzixpdp11/syscall_getppid.s
+index 9db771428..e0c9a6ca4 100644
+--- a/Library/libs/fuzixpdp11/syscall_getppid.s
++++ b/Library/libs/fuzixpdp11/syscall_getppid.s
+@@ -8,5 +8,6 @@ _getppid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getrlimit.s b/Library/libs/fuzixpdp11/syscall_getrlimit.s
+index 0c3f5a301..42c48b6a8 100644
+--- a/Library/libs/fuzixpdp11/syscall_getrlimit.s
++++ b/Library/libs/fuzixpdp11/syscall_getrlimit.s
+@@ -10,5 +10,6 @@ _getrlimit:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getsid.s b/Library/libs/fuzixpdp11/syscall_getsid.s
+index 16e8fea6a..a85248dc4 100644
+--- a/Library/libs/fuzixpdp11/syscall_getsid.s
++++ b/Library/libs/fuzixpdp11/syscall_getsid.s
+@@ -9,5 +9,6 @@ _getsid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_getuid.s b/Library/libs/fuzixpdp11/syscall_getuid.s
+index 5668b45b8..93455dc68 100644
+--- a/Library/libs/fuzixpdp11/syscall_getuid.s
++++ b/Library/libs/fuzixpdp11/syscall_getuid.s
+@@ -8,5 +8,6 @@ _getuid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_ioctl.s b/Library/libs/fuzixpdp11/syscall_ioctl.s
+index f32b10f96..fceb9448e 100644
+--- a/Library/libs/fuzixpdp11/syscall_ioctl.s
++++ b/Library/libs/fuzixpdp11/syscall_ioctl.s
+@@ -12,6 +12,7 @@ _ioctl:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_kill.s b/Library/libs/fuzixpdp11/syscall_kill.s
+index ff5d9f1be..c6bc5f982 100644
+--- a/Library/libs/fuzixpdp11/syscall_kill.s
++++ b/Library/libs/fuzixpdp11/syscall_kill.s
+@@ -10,5 +10,6 @@ _kill:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_link.s b/Library/libs/fuzixpdp11/syscall_link.s
+index 2f557de9b..5fbd0fe1e 100644
+--- a/Library/libs/fuzixpdp11/syscall_link.s
++++ b/Library/libs/fuzixpdp11/syscall_link.s
+@@ -10,5 +10,6 @@ _link:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_memalloc.s b/Library/libs/fuzixpdp11/syscall_memalloc.s
+index a8de7b817..dc959d92a 100644
+--- a/Library/libs/fuzixpdp11/syscall_memalloc.s
++++ b/Library/libs/fuzixpdp11/syscall_memalloc.s
+@@ -9,5 +9,6 @@ _memalloc:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_memfree.s b/Library/libs/fuzixpdp11/syscall_memfree.s
+index 6573edec0..a7fca5893 100644
+--- a/Library/libs/fuzixpdp11/syscall_memfree.s
++++ b/Library/libs/fuzixpdp11/syscall_memfree.s
+@@ -9,5 +9,6 @@ _memfree:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_mkdir.s b/Library/libs/fuzixpdp11/syscall_mkdir.s
+index 2c8ec5b0b..12a2cede8 100644
+--- a/Library/libs/fuzixpdp11/syscall_mkdir.s
++++ b/Library/libs/fuzixpdp11/syscall_mkdir.s
+@@ -10,5 +10,6 @@ _mkdir:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_mknod.s b/Library/libs/fuzixpdp11/syscall_mknod.s
+index da6bab15c..8074d3f54 100644
+--- a/Library/libs/fuzixpdp11/syscall_mknod.s
++++ b/Library/libs/fuzixpdp11/syscall_mknod.s
+@@ -12,6 +12,7 @@ _mknod:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_mount.s b/Library/libs/fuzixpdp11/syscall_mount.s
+index cb1868d82..4c0c50f8b 100644
+--- a/Library/libs/fuzixpdp11/syscall_mount.s
++++ b/Library/libs/fuzixpdp11/syscall_mount.s
+@@ -12,6 +12,7 @@ _mount:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_nice.s b/Library/libs/fuzixpdp11/syscall_nice.s
+index 72d708372..334c8232a 100644
+--- a/Library/libs/fuzixpdp11/syscall_nice.s
++++ b/Library/libs/fuzixpdp11/syscall_nice.s
+@@ -9,5 +9,6 @@ _nice:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_open.s b/Library/libs/fuzixpdp11/syscall_open.s
+index ce5074e1b..6f21e375c 100644
+--- a/Library/libs/fuzixpdp11/syscall_open.s
++++ b/Library/libs/fuzixpdp11/syscall_open.s
+@@ -12,6 +12,7 @@ _open:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_pipe.s b/Library/libs/fuzixpdp11/syscall_pipe.s
+index 1a3cc2217..680a625eb 100644
+--- a/Library/libs/fuzixpdp11/syscall_pipe.s
++++ b/Library/libs/fuzixpdp11/syscall_pipe.s
+@@ -9,5 +9,6 @@ _pipe:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_read.s b/Library/libs/fuzixpdp11/syscall_read.s
+index 82b83dd3d..7b83a64c6 100644
+--- a/Library/libs/fuzixpdp11/syscall_read.s
++++ b/Library/libs/fuzixpdp11/syscall_read.s
+@@ -12,6 +12,7 @@ _read:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_rename.s b/Library/libs/fuzixpdp11/syscall_rename.s
+index 8b7a614fb..29c65f500 100644
+--- a/Library/libs/fuzixpdp11/syscall_rename.s
++++ b/Library/libs/fuzixpdp11/syscall_rename.s
+@@ -10,5 +10,6 @@ _rename:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_rmdir.s b/Library/libs/fuzixpdp11/syscall_rmdir.s
+index 8520321ac..ae8f53f9b 100644
+--- a/Library/libs/fuzixpdp11/syscall_rmdir.s
++++ b/Library/libs/fuzixpdp11/syscall_rmdir.s
+@@ -9,5 +9,6 @@ _rmdir:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_sbrk.s b/Library/libs/fuzixpdp11/syscall_sbrk.s
+index 72d7b8ab3..4be5a1f8b 100644
+--- a/Library/libs/fuzixpdp11/syscall_sbrk.s
++++ b/Library/libs/fuzixpdp11/syscall_sbrk.s
+@@ -9,5 +9,6 @@ _sbrk:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_setgid.s b/Library/libs/fuzixpdp11/syscall_setgid.s
+index 571aaa5a3..8c57eb0f6 100644
+--- a/Library/libs/fuzixpdp11/syscall_setgid.s
++++ b/Library/libs/fuzixpdp11/syscall_setgid.s
+@@ -9,5 +9,6 @@ _setgid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_setgroups.s b/Library/libs/fuzixpdp11/syscall_setgroups.s
+index bd9f20279..20a0f173b 100644
+--- a/Library/libs/fuzixpdp11/syscall_setgroups.s
++++ b/Library/libs/fuzixpdp11/syscall_setgroups.s
+@@ -10,5 +10,6 @@ _setgroups:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_setpgid.s b/Library/libs/fuzixpdp11/syscall_setpgid.s
+index 943dd6154..15d2a3457 100644
+--- a/Library/libs/fuzixpdp11/syscall_setpgid.s
++++ b/Library/libs/fuzixpdp11/syscall_setpgid.s
+@@ -10,5 +10,6 @@ _setpgid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_setpgrp.s b/Library/libs/fuzixpdp11/syscall_setpgrp.s
+index 252042c8f..8604789ba 100644
+--- a/Library/libs/fuzixpdp11/syscall_setpgrp.s
++++ b/Library/libs/fuzixpdp11/syscall_setpgrp.s
+@@ -8,5 +8,6 @@ _setpgrp:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_setrlimit.s b/Library/libs/fuzixpdp11/syscall_setrlimit.s
+index a9ded872d..9919aee22 100644
+--- a/Library/libs/fuzixpdp11/syscall_setrlimit.s
++++ b/Library/libs/fuzixpdp11/syscall_setrlimit.s
+@@ -10,5 +10,6 @@ _setrlimit:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_setsid.s b/Library/libs/fuzixpdp11/syscall_setsid.s
+index 056757c74..324ef923b 100644
+--- a/Library/libs/fuzixpdp11/syscall_setsid.s
++++ b/Library/libs/fuzixpdp11/syscall_setsid.s
+@@ -9,5 +9,6 @@ _setsid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_setuid.s b/Library/libs/fuzixpdp11/syscall_setuid.s
+index ac7cce904..103f8d706 100644
+--- a/Library/libs/fuzixpdp11/syscall_setuid.s
++++ b/Library/libs/fuzixpdp11/syscall_setuid.s
+@@ -9,5 +9,6 @@ _setuid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_signal.s b/Library/libs/fuzixpdp11/syscall_signal.s
+index 27cf9d2fd..b132e54c8 100644
+--- a/Library/libs/fuzixpdp11/syscall_signal.s
++++ b/Library/libs/fuzixpdp11/syscall_signal.s
+@@ -10,5 +10,6 @@ _signal:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_sync.s b/Library/libs/fuzixpdp11/syscall_sync.s
+index cbfb58fb7..4dcf01818 100644
+--- a/Library/libs/fuzixpdp11/syscall_sync.s
++++ b/Library/libs/fuzixpdp11/syscall_sync.s
+@@ -8,5 +8,6 @@ _sync:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_times.s b/Library/libs/fuzixpdp11/syscall_times.s
+index e3ba65b81..de9c95dec 100644
+--- a/Library/libs/fuzixpdp11/syscall_times.s
++++ b/Library/libs/fuzixpdp11/syscall_times.s
+@@ -9,5 +9,6 @@ _times:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_uadmin.s b/Library/libs/fuzixpdp11/syscall_uadmin.s
+index d5de68160..923f32853 100644
+--- a/Library/libs/fuzixpdp11/syscall_uadmin.s
++++ b/Library/libs/fuzixpdp11/syscall_uadmin.s
+@@ -12,6 +12,7 @@ _uadmin:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_umask.s b/Library/libs/fuzixpdp11/syscall_umask.s
+index 860c99072..aa6b02711 100644
+--- a/Library/libs/fuzixpdp11/syscall_umask.s
++++ b/Library/libs/fuzixpdp11/syscall_umask.s
+@@ -9,5 +9,6 @@ _umask:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_unlink.s b/Library/libs/fuzixpdp11/syscall_unlink.s
+index 5a8180e14..939a7100e 100644
+--- a/Library/libs/fuzixpdp11/syscall_unlink.s
++++ b/Library/libs/fuzixpdp11/syscall_unlink.s
+@@ -9,5 +9,6 @@ _unlink:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_utime.s b/Library/libs/fuzixpdp11/syscall_utime.s
+index ad888611a..1862cacab 100644
+--- a/Library/libs/fuzixpdp11/syscall_utime.s
++++ b/Library/libs/fuzixpdp11/syscall_utime.s
+@@ -10,5 +10,6 @@ _utime:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_waitpid.s b/Library/libs/fuzixpdp11/syscall_waitpid.s
+index 52b9f0400..9f7b6cd0e 100644
+--- a/Library/libs/fuzixpdp11/syscall_waitpid.s
++++ b/Library/libs/fuzixpdp11/syscall_waitpid.s
+@@ -12,6 +12,7 @@ _waitpid:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_write.s b/Library/libs/fuzixpdp11/syscall_write.s
+index eeb9ee2f8..a2b9fac99 100644
+--- a/Library/libs/fuzixpdp11/syscall_write.s
++++ b/Library/libs/fuzixpdp11/syscall_write.s
+@@ -12,6 +12,7 @@ _write:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	mov (sp)+, r2
+ 	rts pc
+diff --git a/Library/libs/fuzixpdp11/syscall_yield.s b/Library/libs/fuzixpdp11/syscall_yield.s
+index d76452164..2fe419bc8 100644
+--- a/Library/libs/fuzixpdp11/syscall_yield.s
++++ b/Library/libs/fuzixpdp11/syscall_yield.s
+@@ -8,5 +8,6 @@ _yield:
+ 	tst r1
+ 	beq noerr
+ 	mov r1,_errno
++	mov $-1,r0
+ 	noerr:
+ 	rts pc
+-- 
+2.56.0
+

@@ -1,0 +1,633 @@
+From ffb900ad2ec37f8e22437e11899823f8981ba6e6 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 17:48:11 -0600
+Subject: [PATCH 04/13] pdp11dec: DEQNA/DELQA /dev/eth and kernel sockets for
+ netd; libc: setjmp saves the return address
+
+---
+ Kernel/platform/platform-pdp11dec/Makefile    |  13 +-
+ .../platform-pdp11dec/build_fuzix_disk.sh     |  42 +++
+ Kernel/platform/platform-pdp11dec/config.h    |   4 +
+ Kernel/platform/platform-pdp11dec/dev_qe.c    | 275 ++++++++++++++++++
+ Kernel/platform/platform-pdp11dec/dev_qe.h    |  13 +
+ Kernel/platform/platform-pdp11dec/devices.c   |   8 +-
+ Kernel/platform/platform-pdp11dec/main.c      |  15 +-
+ Kernel/platform/platform-pdp11dec/pdp11.S     |   2 +
+ Kernel/platform/platform-pdp11dec/tricks.S    |  14 +
+ Library/include/setjmp.h                      |   2 +-
+ Library/libs/setjmp_pdp11.S                   |  20 +-
+ 11 files changed, 392 insertions(+), 16 deletions(-)
+ create mode 100644 Kernel/platform/platform-pdp11dec/dev_qe.c
+ create mode 100644 Kernel/platform/platform-pdp11dec/dev_qe.h
+
+diff --git a/Kernel/platform/platform-pdp11dec/Makefile b/Kernel/platform/platform-pdp11dec/Makefile
+index 5fda23c30..bfdce2c6b 100644
+--- a/Kernel/platform/platform-pdp11dec/Makefile
++++ b/Kernel/platform/platform-pdp11dec/Makefile
+@@ -1,6 +1,9 @@
+ 
+ CSRCS = devtty.c
+-CSRCS += devices.c main.c libc.c dev_rl.c
++CSRCS += devices.c main.c libc.c dev_rl.c dev_qe.c
++
++NSRCS = ../../dev/net/net_native.c
++NOBJS = $(patsubst ../../dev/net/%.c,%.o, $(NSRCS))
+ 
+ ASRCS = pdp11.S crt0.S
+ ASRCS += tricks.S divmod.S usermem_mfpi.S
+@@ -10,7 +13,7 @@ DOBJS = $(patsubst ../../dev/%.c,%.o, $(DSRCS))
+ 
+ COBJS = $(CSRCS:.c=$(BINEXT))
+ AOBJS = $(ASRCS:.S=.o)
+-OBJS  = $(COBJS) $(AOBJS) $(DOBJS)
++OBJS  = $(COBJS) $(AOBJS) $(DOBJS) $(NOBJS)
+ 
+ JUNK = $(CSRCS:.c=.o) $(ASRCS:.S=.o)
+ 
+@@ -26,6 +29,9 @@ $(COBJS): %.o: %.c
+ $(AOBJS): %.o: %.S
+ 	$(CROSS_AS) $(ASOPTS) $< -o $*.o
+ 
++$(NOBJS): %.o: ../../dev/net/%.c
++	$(CROSS_CC) $(CROSS_CCOPTS) -I../../dev/net -c $<
++
+ $(DOBJS): %.o: ../../dev/%.c
+ 	$(CROSS_CC) $(CROSS_CCOPTS) -c $<
+ 
+@@ -41,5 +47,6 @@ image:
+ 	pdp11.o ../../syscall_proc.o ../../syscall_other.o ../../mm.o ../../memalloc_none.o \
+ 	../../devsys.o ../../usermem.o ../../syscall_exec.o ../../syscall_exec16.o \
+ 	../../syscall_fs2.o tricks.o ../../syscall_fs3.o ../../blk512.o \
+-	usermem_mfpi.o devtty.o libc.o dev_rl.o > ../../fuzix.map
++	usermem_mfpi.o devtty.o libc.o dev_rl.o dev_qe.o \
++	../../syscall_net.o ../../network.o net_native.o > ../../fuzix.map
+ 	pdp11-aout-objcopy fuzix.aout -O binary ../../fuzix.bin
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index 8c5e0df41..a4f4e423d 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -206,6 +206,42 @@ build_util levee \
+ CFLAGS="$SAVED_CFLAGS"
+ make_fuz levee
+ 
++# --- Networking: netd (uIP) on /dev/eth, and its programs ---
++NETDIR="$FUZIXDIR/Applications/netd"
++echo "Building netd and network programs..."
++SAVED_CFLAGS="$CFLAGS"
++CFLAGS="$CFLAGS -DNETD_LITTLE_ENDIAN -I$NETDIR"
++build_util netd $(for f in netd uip uiplib timer clock-arch uip_arp eth; do echo "$NETDIR/$f.c"; done)
++make_fuz netd
++NET_BINS="netd"
++for app in telnet ping ntpdate htget dig; do
++    build_util $app "$NETDIR/$app.c" "$NETDIR/gethostbyname.c"
++    make_fuz $app
++    NET_BINS="$NET_BINS $app"
++done
++for app in httpd ifconfig echoping; do
++    build_util $app "$NETDIR/$app.c"
++    make_fuz $app
++    NET_BINS="$NET_BINS $app"
++done
++build_util tinyirc "$NETDIR/tinyirc.c" "$NETDIR/linein.c" "$NETDIR/gethostbyname.c"
++make_fuz tinyirc
++NET_BINS="$NET_BINS tinyirc"
++CFLAGS="$SAVED_CFLAGS"
++EXTRA_BINS="$EXTRA_BINS $NET_BINS"
++
++# /etc/netrc: SIMH's NAT network by default; edit for your LAN
++cat > "$BUILDDIR/netrc" <<'NETEOF'
++# netd configuration: this machine's address on the LAN.
++# Edit to suit, then restart netd.
++ipaddr  10.0.2.15
++gateway 10.0.2.2
++netmask 255.255.255.0
++NETEOF
++cat > "$BUILDDIR/resolv.conf" <<'RESEOF'
++nameserver 10.0.2.3
++RESEOF
++
+ # --- Assemble bootloader ---
+ echo "Assembling bootloader..."
+ PDP11_ASM="${PDP11_ASM:-pdp11_asm.py}"
+@@ -288,6 +324,8 @@ mknod zero 020666 1029
+ mknod proc 020666 1025
+ mknod hd0 060660 0
+ mknod hd1 060660 1
++mknod eth 020666 2048
++mknod net 020666 1089
+ cd /
+ mkdir tmp
+ mkdir home
+@@ -402,6 +440,10 @@ bget $BUILDDIR/group group
+ chmod 644 group
+ bget $BUILDDIR/mtab mtab
+ chmod 644 mtab
++bget $BUILDDIR/netrc netrc
++chmod 644 netrc
++bget $BUILDDIR/resolv.conf resolv.conf
++chmod 644 resolv.conf
+ cd /usr
+ mkdir lib
+ chmod 755 lib
+diff --git a/Kernel/platform/platform-pdp11dec/config.h b/Kernel/platform/platform-pdp11dec/config.h
+index ce27e607f..451743dbf 100644
+--- a/Kernel/platform/platform-pdp11dec/config.h
++++ b/Kernel/platform/platform-pdp11dec/config.h
+@@ -54,6 +54,10 @@
+ 
+ #define SWAPDEV		(1)
+ 
++/* TCP/IP: kernel sockets, netd (uIP) in user space, /dev/eth */
++#define CONFIG_NET
++#define CONFIG_NET_NATIVE
++
+ #define TICKSPERSEC 60   /* Ticks per second — KW11-L line clock */
+ 
+ #define BOOT_TTY (512 + 1)   /* Set this to default device for stdio, stderr */
+diff --git a/Kernel/platform/platform-pdp11dec/dev_qe.c b/Kernel/platform/platform-pdp11dec/dev_qe.c
+new file mode 100644
+index 000000000..67e43a537
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/dev_qe.c
+@@ -0,0 +1,275 @@
++/*
++ * DEQNA / DELQA Ethernet controller at 174440: /dev/eth for netd.
++ *
++ * read() returns one received frame (0 if none is waiting: netd polls),
++ * write() sends one frame, ioctl 0 returns the Ethernet address.
++ *
++ * The controller works through lists of six word buffer descriptors
++ * (DMA).  It is used in DEQNA-lock mode, as DEC's drivers do:
++ *
++ * receive:  NRX descriptors, each with a buffer for a whole frame, then
++ *           an invalid one that ends the list.  When the controller has
++ *           filled them all it stops there (CSR RL, "receive list
++ *           invalid"); the list is then re-armed and handed over again.
++ * transmit: one descriptor and an end marker per frame; write() waits
++ *           until the controller has taken it (status word 1 written).
++ *
++ * The descriptors are in kernel data (identity mapped, so their virtual
++ * address is physical).  The frame buffers are physical memory above the
++ * user banks (qe_click, main.c), reached through the KIPAR6 window.
++ */
++#include <kernel.h>
++#include <kdata.h>
++#include <printf.h>
++#include <dev_qe.h>
++
++#define QE_BASE		0174440
++#define QE_REG(n)	(*(volatile uint16_t *)(QE_BASE + 2 * (n)))
++#define QE_RBDL_LO	QE_REG(2)
++#define QE_RBDL_HI	QE_REG(3)
++#define QE_TBDL_LO	QE_REG(4)
++#define QE_TBDL_HI	QE_REG(5)
++#define QE_VAR		QE_REG(6)
++#define QE_CSR		QE_REG(7)
++
++#define CSR_RE	0000001
++#define CSR_SR	0000002
++#define CSR_NI	0000004
++#define CSR_XL	0000020
++#define CSR_RL	0000040
++#define CSR_IL	0000400
++
++#define DSC_V	0100000		/* valid */
++#define DSC_C	0040000		/* chain */
++#define DSC_E	0020000		/* end of message */
++#define DSC_S	0010000		/* setup frame */
++#define DSC_L	0000200		/* odd length: last byte unused */
++
++#define SW1_NOTYET	0100000
++#define SW1_LASTNOT	0140000
++#define SW1_ERROR	0040000
++#define SW1_ESETUP	0020000
++
++#define ETH_MAX		1514
++#define BUFW		760		/* words per buffer: 1520 bytes */
++#define BUFCLICKS	24		/* 1536 bytes */
++#define NRX		8
++
++#define KIPAR6	(*(volatile uint16_t *)0172354)
++#define WINDOW	((uint8_t *)0xC000)
++
++struct desc {
++	uint16_t flag, addr_hi, addr_lo, wc, sw1, sw2;
++};
++
++static volatile struct desc rxd[NRX + 1];
++static volatile struct desc txd[2];
++static uint8_t rx_next;
++static uint8_t need_reload;
++static uint8_t qe_state;	/* 0 not tried, 1 running, 2 absent */
++static uint8_t mac[6];
++
++/* Physical memory for the buffers: NRX receive, one transmit */
++extern uint16_t qe_click;
++#define RXCLICK(i)	(qe_click + (i) * BUFCLICKS)
++#define TXCLICK		(qe_click + NRX * BUFCLICKS)
++
++extern uint16_t io_present(uint16_t addr);
++
++static uint8_t *window(uint16_t click)
++{
++	KIPAR6 = click;
++	return WINDOW;
++}
++
++/* Point a descriptor at a buffer: 18 bit physical address */
++static void set_buf(volatile struct desc *d, uint16_t click, uint16_t flags)
++{
++	d->addr_lo = click << 6;
++	d->addr_hi = flags | (click >> 10);
++}
++
++static void rx_arm(void)
++{
++	uint8_t i;
++	for (i = 0; i < NRX; i++) {
++		rxd[i].flag = SW1_NOTYET;
++		set_buf(&rxd[i], RXCLICK(i), DSC_V);
++		rxd[i].wc = -BUFW;
++		rxd[i].sw1 = SW1_NOTYET;
++		rxd[i].sw2 = 0;
++	}
++	rxd[NRX].flag = SW1_NOTYET;
++	rxd[NRX].addr_hi = 0;		/* end of the list */
++	rxd[NRX].sw1 = SW1_NOTYET;
++	rx_next = 0;
++}
++
++static void rx_load(void)
++{
++	QE_RBDL_LO = (uint16_t)rxd;
++	QE_RBDL_HI = 0;
++}
++
++/* Send the transmit buffer; 0 on error or timeout */
++static int tx_buffer(uint16_t len, uint16_t setup)
++{
++	uint16_t words = (len + 1) >> 1;
++	uint16_t n;
++
++	txd[0].flag = SW1_NOTYET;
++	set_buf(&txd[0], TXCLICK, DSC_V | DSC_E | setup | ((len & 1) ? DSC_L : 0));
++	txd[0].wc = -words;
++	txd[0].sw1 = SW1_NOTYET;
++	txd[0].sw2 = 0;
++	txd[1].flag = SW1_NOTYET;
++	txd[1].addr_hi = 0;
++	txd[1].sw1 = SW1_NOTYET;
++	QE_TBDL_LO = (uint16_t)txd;
++	QE_TBDL_HI = 0;
++	/* A frame takes about a millisecond on the wire */
++	for (n = 0; n < 60000U; n++) {
++		if (txd[0].sw1 != SW1_NOTYET)
++			return (txd[0].sw1 & SW1_LASTNOT) != SW1_ERROR;
++		if (QE_CSR & CSR_NI) {
++			kprintf("qe: nonexistent memory\n");
++			return 0;
++		}
++	}
++	return 0;
++}
++
++/* Receive broadcasts and our own address */
++static void setup_frame(void)
++{
++	uint8_t *p = window(TXCLICK);
++	uint8_t n, j;
++	memset(p, 0, 128);
++	for (n = 0; n < 14; n++) {
++		uint8_t base = n < 7 ? n + 1 : 64 + n - 7 + 1;
++		for (j = 0; j < 6; j++)
++			p[base + j * 8] = n == 0 ? 0xFF : mac[j];
++	}
++	tx_buffer(128, DSC_S);
++}
++
++static int qe_start(void)
++{
++	uint8_t i;
++	uint16_t n;
++
++	if (qe_state)
++		return qe_state == 1;
++	qe_state = 2;
++	if (!qe_click || !io_present(QE_BASE + 016))
++		return 0;
++	QE_CSR = CSR_SR;		/* software reset on 1 -> 0 */
++	QE_CSR = 0;
++	for (n = 0; n < 20000U; n++)	/* let it settle */
++		;
++	QE_VAR = 0;			/* DEQNA-lock mode, no interrupts */
++	for (i = 0; i < 6; i++)
++		mac[i] = QE_REG(i) & 0xFF;
++	QE_CSR = CSR_IL;		/* receiver off while loading */
++	rx_arm();
++	rx_load();
++	QE_CSR = CSR_IL | CSR_RE;
++	setup_frame();
++	qe_state = 1;
++	kprintf("qe0: DEQNA/DELQA at 174440, %x:%x:%x:%x:%x:%x\n",
++		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
++	return 1;
++}
++
++int eth_open(uint8_t minor, uint16_t flag)
++{
++	used(flag);
++	if (minor || !qe_start()) {
++		udata.u_error = ENODEV;
++		return -1;
++	}
++	return 0;
++}
++
++int eth_close(uint8_t minor)
++{
++	used(minor);
++	return 0;
++}
++
++/* One frame, or 0 if none is waiting */
++int eth_read(uint8_t minor, uint8_t rawflag, uint8_t flag)
++{
++	int r = 0;
++	used(minor);
++	used(rawflag);
++	used(flag);
++
++	while (rx_next < NRX) {
++		volatile struct desc *d = &rxd[rx_next];
++		uint16_t sw1 = d->sw1;
++		if (sw1 == SW1_NOTYET)
++			break;
++		if (!(sw1 & SW1_ERROR) && !(sw1 & SW1_ESETUP)) {
++			uint16_t len = ((sw1 & 03400) | (d->sw2 & 0377)) + 60;
++			if (len > ETH_MAX)
++				len = ETH_MAX;
++			if (len > udata.u_count)
++				len = udata.u_count;
++			if (uput(window(RXCLICK(rx_next)), udata.u_base, len))
++				r = -1;
++			else
++				r = len;
++		}
++		/* errors, setup frame echoes, pieces of chained frames:
++		   dropped */
++		rx_next++;
++		if (r)
++			break;
++	}
++	if (rx_next >= NRX) {
++		rx_arm();
++		need_reload = 1;
++	}
++	/* The controller stops at the end of the list: hand it over again */
++	if (need_reload && (QE_CSR & CSR_RL)) {
++		need_reload = 0;
++		rx_load();
++	}
++	return r;
++}
++
++int eth_write(uint8_t minor, uint8_t rawflag, uint8_t flag)
++{
++	uint16_t len = udata.u_count;
++	uint8_t *p;
++	used(minor);
++	used(rawflag);
++	used(flag);
++
++	if (len > ETH_MAX) {
++		udata.u_error = EMSGSIZE;
++		return -1;
++	}
++	p = window(TXCLICK);
++	if (uget(udata.u_base, p, len))
++		return -1;
++	if (len < 60) {
++		memset(p + len, 0, 60 - len);
++		len = 60;
++	}
++	if (!tx_buffer(len, 0)) {
++		udata.u_error = EIO;
++		return -1;
++	}
++	return udata.u_count;
++}
++
++/* ioctl 0: the Ethernet address (6 bytes) */
++int eth_ioctl(uint8_t minor, uarg_t request, char *data)
++{
++	used(minor);
++	if (request != 0)
++		return -1;
++	return uput(mac, data, 6);
++}
+diff --git a/Kernel/platform/platform-pdp11dec/dev_qe.h b/Kernel/platform/platform-pdp11dec/dev_qe.h
+new file mode 100644
+index 000000000..b08cd16d8
+--- /dev/null
++++ b/Kernel/platform/platform-pdp11dec/dev_qe.h
+@@ -0,0 +1,13 @@
++#ifndef __DEV_QE_DOT_H__
++#define __DEV_QE_DOT_H__
++
++int eth_open(uint8_t minor, uint16_t flag);
++int eth_close(uint8_t minor);
++int eth_read(uint8_t minor, uint8_t rawflag, uint8_t flag);
++int eth_write(uint8_t minor, uint8_t rawflag, uint8_t flag);
++int eth_ioctl(uint8_t minor, uarg_t request, char *data);
++
++/* Physical memory the driver needs, in 64 byte clicks (8 + 1 buffers) */
++#define QE_CLICKS	(9 * 24)
++
++#endif
+diff --git a/Kernel/platform/platform-pdp11dec/devices.c b/Kernel/platform/platform-pdp11dec/devices.c
+index 5a2dc6ca1..fd571bf9d 100644
+--- a/Kernel/platform/platform-pdp11dec/devices.c
++++ b/Kernel/platform/platform-pdp11dec/devices.c
+@@ -6,6 +6,7 @@
+ #include <vt.h>
+ #include <dev_rl.h>
+ #include <devtty.h>
++#include <dev_qe.h>
+ 
+ struct devsw dev_tab[] =  /* The device driver switch table */
+ {
+@@ -21,7 +22,12 @@ struct devsw dev_tab[] =  /* The device driver switch table */
+   {  no_open,     no_close,   no_rdwr,   no_rdwr,  no_ioctl  },
+   /* 4: /dev/mem etc	System devices (one offs) */
+   {  no_open,      no_close,    sys_read, sys_write, sys_ioctl  },
+-  /* Pack to 7 with nxio if adding private devices and start at 8 */
++  /* 5-7: unused */
++  {  nxio_open,     no_close,    no_rdwr,   no_rdwr,   no_ioctl },
++  {  nxio_open,     no_close,    no_rdwr,   no_rdwr,   no_ioctl },
++  {  nxio_open,     no_close,    no_rdwr,   no_rdwr,   no_ioctl },
++  /* 8: /dev/eth	DEQNA/DELQA, for netd */
++  {  eth_open,      eth_close,   eth_read,  eth_write, eth_ioctl },
+ };
+ 
+ bool validdev(uint16_t dev)
+diff --git a/Kernel/platform/platform-pdp11dec/main.c b/Kernel/platform/platform-pdp11dec/main.c
+index 1bf9d711d..e33dc80e8 100644
+--- a/Kernel/platform/platform-pdp11dec/main.c
++++ b/Kernel/platform/platform-pdp11dec/main.c
+@@ -4,6 +4,10 @@
+ #include <printf.h>
+ #include <devtty.h>
+ #include <buddy.h>
++#include <dev_qe.h>
++
++extern uint16_t get_usp(void);
++extern void set_usp(uint16_t);
+ 
+ void plt_idle(void)
+ {
+@@ -33,6 +37,7 @@ uint8_t need_resched;
+ uint16_t bank_click[MAX_MAPS + 1];
+ uint16_t mem_top_click;		/* first missing click */
+ uint16_t free_click;		/* first click above the banks */
++uint16_t qe_click;		/* Ethernet buffers (dev_qe.c), 0 if none */
+ 
+ extern uint16_t phys_present(uint16_t click);
+ 
+@@ -50,12 +55,14 @@ void pagemap_init(void)
+ 	ramsize = c >> 4;
+ 	for (n = 1; n <= MAX_MAPS; n++) {
+ 		c = BANK0_CLICK + (n - 1) * BANK_CLICKS;
+-		if (c + BANK_CLICKS > mem_top_click)
++		if (c + BANK_CLICKS + QE_CLICKS > mem_top_click)
+ 			break;
+ 		bank_click[n] = c;
+ 		pagemap_add(n);
+ 	}
+ 	free_click = BANK0_CLICK + (n - 1) * BANK_CLICKS;
++	if (free_click + QE_CLICKS <= mem_top_click)
++		qe_click = free_click;
+ 	procmem = (n - 1) * (BANK_CLICKS >> 4);
+ }
+ 
+@@ -79,8 +86,10 @@ void memzero(void *p, usize_t len)
+    uncaught SIGSEGV that is doexit, which never returns here.  A
+    CAUGHT SIGSEGV is staged in u_cursig and delivered by trap_mmu's
+    return hook (otherwise the process would refault forever). */
+-void plt_usermmu(void)
++void plt_usermmu(uint16_t pc)
+ {
++	kprintf("pid %d: MMU abort, SR0 %x PC %x SP %x\n", udata.u_ptab->p_pid,
++		*(volatile uint16_t *)0177572, pc, get_usp());
+ 	*(volatile uint16_t *)0177572 = 1;	/* SR0: enable, clear errors */
+ 	ssig(udata.u_ptab, SIGSEGV);
+ 	chksigs();
+@@ -126,8 +135,6 @@ void plt_usertrap(uint16_t vec)
+  * or 0 if there is nothing to run after all.  Kill paths never
+  * return.
+  */
+-extern uint16_t get_usp(void);
+-extern void set_usp(uint16_t);
+ 
+ uint16_t sig_deliver(uint16_t upc, uint16_t upsw, uint16_t ur0, uint16_t ur1)
+ {
+diff --git a/Kernel/platform/platform-pdp11dec/pdp11.S b/Kernel/platform/platform-pdp11dec/pdp11.S
+index 00b7b13f1..bd223b81c 100644
+--- a/Kernel/platform/platform-pdp11dec/pdp11.S
++++ b/Kernel/platform/platform-pdp11dec/pdp11.S
+@@ -559,7 +559,9 @@ trap_mmu:
+ 	mov r3,-(sp)
+ 	mov r4,-(sp)
+ 	mov r5,-(sp)
++	mov 12(sp),-(sp)	/* user PC */
+ 	jsr pc,_plt_usermmu
++	tst (sp)+
+ trap_user_ret:
+ 	/* Held signals resume (and possibly refault); default SIGSEGV
+ 	   never returns — the process is gone and we run something
+diff --git a/Kernel/platform/platform-pdp11dec/tricks.S b/Kernel/platform/platform-pdp11dec/tricks.S
+index 1c21d2d30..db0a9f3a9 100644
+--- a/Kernel/platform/platform-pdp11dec/tricks.S
++++ b/Kernel/platform/platform-pdp11dec/tricks.S
+@@ -335,6 +335,20 @@ bank_copy:
+ 	sob r5,1b
+ 	rts pc
+ 
++/*
++ * uint16_t io_present(uint16_t addr): 1 if a device register answers
++ * at addr (I/O page), with the bus error vector caught.
++ */
++	.globl _io_present
++_io_present:
++	mov *$4,-(sp)
++	mov *$6,-(sp)
++	mov $pp_nx,*$4
++	mov $0340,*$6
++	mov $1,r0
++	tst *6(sp)
++	br pp_out
++
+ /*
+  * uint16_t phys_present(uint16_t click): 1 if there is memory at
+  * physical click * 64 (read through the KIPAR6 window with the bus
+diff --git a/Library/include/setjmp.h b/Library/include/setjmp.h
+index a7506d166..656191a60 100644
+--- a/Library/include/setjmp.h
++++ b/Library/include/setjmp.h
+@@ -91,7 +91,7 @@
+ 
+ #elif defined(__pdp11__)
+ 
+-	typedef uint16_t jmp_buf[5];
++	typedef uint16_t jmp_buf[6];	/* r2-r5, sp, return pc */
+ 	extern int setjmp(jmp_buf __env);
+ 	__attribute__((__noreturn__)) void longjmp (jmp_buf __env, int __val);
+ 
+diff --git a/Library/libs/setjmp_pdp11.S b/Library/libs/setjmp_pdp11.S
+index 1728ab1d5..302ea87cb 100644
+--- a/Library/libs/setjmp_pdp11.S
++++ b/Library/libs/setjmp_pdp11.S
+@@ -1,28 +1,34 @@
+-
++/*
++ *	setjmp/longjmp for the PDP-11 (gcc): jmp_buf = r2-r5, sp, pc.
++ *
++ *	The return address must be saved too: by the time longjmp runs,
++ *	the stack slot setjmp returned through has usually been reused.
++ */
+ 	.text
+ 	.even
+ 	.globl _setjmp
+ 	.globl _longjmp
+ 
+-
+ _setjmp:
+ 	mov 2(sp),r0
+ 	mov r2,(r0)+
+ 	mov r3,(r0)+
+ 	mov r4,(r0)+
+ 	mov r5,(r0)+
+-	mov r6,(r0)+
++	mov sp,(r0)+		/* sp -> the return address */
++	mov (sp),(r0)+		/* the return address */
+ 	clr r0
+ 	rts pc
+ 
+ _longjmp:
+ 	mov 2(sp),r1
+ 	mov 4(sp),r0
+-	beq r0_ok
+-	inc r0
+-r0_ok:	mov (r1)+,r2
++	bne 1f
++	inc r0			/* longjmp(env, 0) returns 1 */
++1:	mov (r1)+,r2
+ 	mov (r1)+,r3
+ 	mov (r1)+,r4
+ 	mov (r1)+,r5
+-	mov (r1)+,r6
++	mov (r1)+,sp
++	mov (r1)+,(sp)		/* put the return address back */
+ 	rts pc
+-- 
+2.56.0
+

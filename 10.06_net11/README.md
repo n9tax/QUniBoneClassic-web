@@ -50,9 +50,8 @@ PING 142.250.185.78: 56 data bytes
 Then, from any other computer on the LAN (not the BeagleBone itself, see
 DELQA.md): open `http://192.168.1.57/` in a browser, or `telnet 192.168.1.57`.
 
-The QBone's KW11 runs at 50 Hz unless told otherwise. In the US, add
-`sd kw11` and `p freq 60` to the configuration's extra commands, or type
-`hz 50` in net11.
+The QBone's KW11 runs at 50 Hz unless told otherwise: choose 60 Hz in the
+configuration (SERIAL & CLOCK), or type `hz 50` in net11.
 
 ## Commands
 
@@ -95,8 +94,9 @@ cp net11.lda ../../10.02_devices/5_boot/
 
 ### GCC fixes for the PDP-11
 
-Testing net11 turned up four code generation bugs in GCC's PDP-11 back end
-(13.3 and 15.2 alike). [`toolchain/gcc-13-pdp11-shift-mul-cmp.patch`](toolchain/gcc-13-pdp11-shift-mul-cmp.patch)
+Testing net11, and later Fuzix, turned up five code generation bugs in GCC's
+PDP-11 back end (13.3 and 15.2 alike).
+[`toolchain/gcc-13-pdp11-fixes.patch`](toolchain/gcc-13-pdp11-fixes.patch)
 fixes them:
 
 1. **Right shifts by `ash`/`ashc` were described as left shifts by a negative
@@ -112,13 +112,18 @@ fixes them:
    generic word by word code.
 4. **32 bit multiply** sometimes left the multiplicand in the odd register of
    the `mul` register pair, which `mul` does not read.
+5. **32 and 64 bit loads through a pointer** in the first register of the
+   destination were compiled as `mov (r0),r0; mov 2(r0),r1`: the second word
+   came through the overwritten pointer. `long f(long *p) { return *p; }`
+   was wrong at every optimization level. The pointer's word is loaded last
+   now. (net11 contains no such load; Fuzix, with its 64 bit `time_t`, did.)
 
 `tools/gen_cctest.py` generates the test programs that found them: about
 17,000 checks of shifts, compares, multiply and divide for every integer type
 at -O0, -O1, -Os and -O2, run in emu11 against results computed in Python.
 Build net11 with the patched compiler only. (It also has its own 32 bit
 division in assembler, `src/lib32.S`, and avoids byte shifts and signed
-32 bit compares, but bugs 1 and 4 can strike anywhere.)
+32 bit compares, but bugs 1, 4 and 5 can strike anywhere.)
 
 ## emu11: testing without a PDP-11
 

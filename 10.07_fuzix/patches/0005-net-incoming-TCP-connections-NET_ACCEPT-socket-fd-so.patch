@@ -1,0 +1,971 @@
+From b9ddd8a437c0b10bd960a4aa7bd3cfd3328840aa Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 18:32:15 -0600
+Subject: [PATCH 05/13] net: incoming TCP connections (NET_ACCEPT), socket
+ fd->socket mapping, bind sets the local address, graceful close; netd -d;
+ telnetd and httpd; /etc/rc
+
+---
+ Applications/netd/fuzix-conf.h                |   1 +
+ Applications/netd/httpd.c                     | 184 +++++++---
+ Applications/netd/netd.c                      |  94 +++++-
+ Applications/netd/netd.h                      |   1 +
+ Applications/netd/telnetd.c                   | 317 ++++++++++++++++++
+ Applications/netd/uip.c                       |   3 +
+ Kernel/dev/net/net_native.c                   |  49 ++-
+ Kernel/include/net_native.h                   |  10 +
+ .../platform-pdp11dec/build_fuzix_disk.sh     |  33 +-
+ Kernel/platform/platform-pdp11dec/config.h    |   2 +-
+ Kernel/platform/platform-pdp11dec/init.c      |  12 +
+ Kernel/syscall_net.c                          |   1 +
+ Library/include/sys/net_native.h              |  10 +
+ 13 files changed, 664 insertions(+), 53 deletions(-)
+ create mode 100644 Applications/netd/telnetd.c
+
+diff --git a/Applications/netd/fuzix-conf.h b/Applications/netd/fuzix-conf.h
+index e0bf9cb2b..a106fa70d 100644
+--- a/Applications/netd/fuzix-conf.h
++++ b/Applications/netd/fuzix-conf.h
+@@ -6,6 +6,7 @@
+ #define CCIF
+ 
+ typedef uint8_t uip_tcp_appstate_t;
++#define NO_LINK 0xFF	/* uip_conn appstate of a passive open before netd links it */
+ typedef uint8_t uip_udp_appstate_t;
+ typedef uint8_t uip_raw_appstate_t;
+ typedef uint8_t uip_stats_t;
+diff --git a/Applications/netd/httpd.c b/Applications/netd/httpd.c
+index 37971def9..8e1eefec7 100644
+--- a/Applications/netd/httpd.c
++++ b/Applications/netd/httpd.c
+@@ -1,57 +1,165 @@
+-/* 
+-
+-   A simple http server
+-
++/*
++ * httpd - a small web server for Fuzix: serves the files under /www.
++ *
++ *   httpd [port] [root]     default port 80, root /www
++ *
++ * One request per connection (HTTP/1.0), GET and HEAD, one connection
++ * at a time.  "/" and directories serve index.html.
+  */
++#include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
+-#include <stdlib.h>
+ #include <fcntl.h>
+-#include <termios.h>
+-#include <stdio.h>
+ #include <errno.h>
++#include <signal.h>
++#include <sys/stat.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+ 
++static const char *root = "/www";
++static char buf[512];
+ 
+-struct sockaddr_in addr;
+-struct sockaddr_in laddr;
+-int lfd;
+-
+-
+-void my_open( int argc, char *argv[]){
+-    int port = 8080;    /* default port */
+-
+-    addr.sin_port = htons(port);
+-    addr.sin_family = AF_INET;
+-
+-    lfd = socket(AF_INET, SOCK_STREAM, 0);
+-    if (lfd < 0) {
+-	perror("af_inet sock_stream 0");
+-	exit(1);
+-    }
+-    if( bind( lfd, (struct sockaddr *)&addr, sizeof(addr) ) ){
+-	perror("bind");
+-	exit(1);
+-    }
++static void reply(int fd, const char *status, const char *type, long len)
++{
++	int n;
++	if (len >= 0)
++		n = snprintf(buf, sizeof(buf),
++			"HTTP/1.0 %s\r\nServer: Fuzix httpd (PDP-11)\r\n"
++			"Content-Type: %s\r\nContent-Length: %ld\r\n"
++			"Connection: close\r\n\r\n", status, type, len);
++	else
++		n = snprintf(buf, sizeof(buf),
++			"HTTP/1.0 %s\r\nServer: Fuzix httpd (PDP-11)\r\n"
++			"Content-Type: %s\r\nConnection: close\r\n\r\n",
++			status, type);
++	write(fd, buf, n);
++}
+ 
+-    if( listen( lfd, 1 ) ){
+-	perror("listen");
+-	exit(1);
+-    }
+-    if (accept(lfd, NULL, NULL) < 0)
+-     perror("accept");
++static void error(int fd, const char *status)
++{
++	char body[128];
++	int n = snprintf(body, sizeof(body),
++		"<html><body><h1>%s</h1></body></html>\n", status);
++	reply(fd, status, "text/html", n);
++	write(fd, body, n);
+ }
+ 
+-int main( int argc, char *argv[]){
+-	int len;
++static const char *type_of(const char *path)
++{
++	const char *e = strrchr(path, '.');
++	if (e == NULL)
++		return "text/plain";
++	if (!strcmp(e, ".html") || !strcmp(e, ".htm"))
++		return "text/html";
++	if (!strcmp(e, ".txt") || !strcmp(e, ".c") || !strcmp(e, ".h"))
++		return "text/plain";
++	if (!strcmp(e, ".css"))
++		return "text/css";
++	if (!strcmp(e, ".gif"))
++		return "image/gif";
++	if (!strcmp(e, ".png"))
++		return "image/png";
++	if (!strcmp(e, ".jpg"))
++		return "image/jpeg";
++	return "application/octet-stream";
++}
+ 
+-	my_open( argc, argv );
+-	printf("httpd server\n");
+-	return 0;
++/* Read the request head: returns its length, or -1 */
++static int read_request(int fd)
++{
++	int n = 0, k;
++	while (n < (int)sizeof(buf) - 1) {
++		k = read(fd, buf + n, sizeof(buf) - 1 - n);
++		if (k <= 0)
++			return n ? n : -1;
++		n += k;
++		buf[n] = 0;
++		if (strstr(buf, "\r\n\r\n") || strstr(buf, "\n\n"))
++			break;
++	}
++	buf[n] = 0;
++	return n;
++}
+ 
++static void serve(int fd)
++{
++	char path[128];
++	char *method, *url, *p;
++	struct stat st;
++	int head, f, n;
+ 
++	if (read_request(fd) < 0)
++		return;
++	method = strtok(buf, " ");
++	url = strtok(NULL, " \r\n");
++	if (method == NULL || url == NULL) {
++		error(fd, "400 Bad Request");
++		return;
++	}
++	head = !strcmp(method, "HEAD");
++	if (!head && strcmp(method, "GET")) {
++		error(fd, "501 Not Implemented");
++		return;
++	}
++	if ((p = strchr(url, '?')) != NULL)
++		*p = 0;
++	if (url[0] != '/' || strstr(url, "..")) {
++		error(fd, "400 Bad Request");
++		return;
++	}
++	snprintf(path, sizeof(path), "%s%s", root, url);
++	if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
++		n = strlen(path);
++		snprintf(path + n, sizeof(path) - n, "%sindex.html",
++			path[n - 1] == '/' ? "" : "/");
++	}
++	if (stat(path, &st) < 0 || !S_ISREG(st.st_mode) ||
++	    (f = open(path, O_RDONLY)) < 0) {
++		error(fd, "404 Not Found");
++		return;
++	}
++	reply(fd, "200 OK", type_of(path), st.st_size);
++	if (!head)
++		while ((n = read(f, buf, sizeof(buf))) > 0)
++			if (write(fd, buf, n) != n)
++				break;
++	close(f);
+ }
+ 
++int main(int argc, char *argv[])
++{
++	struct sockaddr_in addr;
++	int lfd, fd;
+ 
++	if (argc > 2)
++		root = argv[2];
++	memset(&addr, 0, sizeof(addr));
++	addr.sin_family = AF_INET;
++	addr.sin_port = htons(argc > 1 ? atoi(argv[1]) : 80);
++	lfd = socket(AF_INET, SOCK_STREAM, 0);
++	if (lfd < 0) {
++		perror("httpd: socket");
++		return 1;
++	}
++	if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
++		perror("httpd: bind");
++		return 1;
++	}
++	if (listen(lfd, 2) < 0) {
++		perror("httpd: listen");
++		return 1;
++	}
++	signal(SIGPIPE, SIG_IGN);
++	for (;;) {
++		fd = accept(lfd, NULL, NULL);
++		if (fd < 0) {
++			if (errno != EINTR)
++				sleep(1);
++			continue;
++		}
++		serve(fd);
++		close(fd);
++	}
++}
+diff --git a/Applications/netd/netd.c b/Applications/netd/netd.c
+index 6b8224303..fb772cb34 100644
+--- a/Applications/netd/netd.c
++++ b/Applications/netd/netd.c
+@@ -23,7 +23,11 @@ todo:
+ * refactor  RAW with UDP code as they are very similar
+ 
+ */
++#ifdef NETD_TRACE
++#define TRACE
++#else
+ #undef TRACE
++#endif
+ 
+ 
+ #include <stdio.h>
+@@ -221,10 +225,48 @@ uint16_t cap( struct link *s )
+ 		return s->tend - s->tstart;
+ }
+ 
++/* A connection came in on a listening port: give it a link, and ask the
++   kernel for a socket that accept() will hand out.  -1 if nobody listens
++   or there is no room. */
++static int accept_conn(void)
++{
++	struct netaccept na;
++	int i, lcn, sn;
++
++	for (i = 0; i < NSOCKET; i++)
++		if ((map[i].flags & LINK_LISTEN) && map[i].port == uip_conn->lport)
++			break;
++	if (i == NSOCKET || freeptr == 0)
++		return -1;
++	lcn = get_map();
++	na.listener = map[i].socketn;
++	na.lcn = lcn;
++	na.port = uip_conn->rport;
++	memcpy(&na.addr, &uip_conn->ripaddr, 4);
++	sn = ioctl(knet, NET_ACCEPT, &na);
++	if (sn < 0) {
++		rel_map(lcn);
++		return -1;
++	}
++	map[lcn].socketn = sn;
++	map[lcn].lcn = lcn;
++	map[lcn].conn = uip_conn;
++	uip_conn->appstate = lcn;
++	return 0;
++}
++
+ /* uIP callback for TCP events */
+ void netd_appcall(void)
+ {
+-	struct link *s = & map[uip_conn->appstate];
++	struct link *s;
++
++	if (uip_conn->appstate == NO_LINK) {
++		if (!uip_connected() || accept_conn() < 0) {
++			uip_abort();
++			return;
++		}
++	}
++	s = & map[uip_conn->appstate];
+ 	ne.socket = s->socketn;
+ 
+ #ifdef TRACE
+@@ -349,12 +391,13 @@ void netd_appcall(void)
+ 			}
+ 		}
+ 
+-		/* test for local close - LINK_CLOSED is set by kernel event thread */
+-		if ( s->flags & LINK_CLOSED ){
+-			if (uip_outstanding(uip_conn))
+-				uip_abort();
+-			else
+-				uip_close();
++		/* test for local close - LINK_CLOSED is set by kernel event
++		   thread.  Close only when everything written has been sent
++		   and acknowledged (a server typically writes its reply and
++		   closes at once); until then the next poll checks again. */
++		if ( (s->flags & LINK_CLOSED) && !s->len &&
++		     s->tend == s->tstart && !uip_outstanding(uip_conn) ){
++			uip_close();
+ 			s->flags &= ~LINK_CLOSED;
+ 			s->flags |= LINK_SHUTW | LINK_DEAD;
+ 			ne.socket = s->socketn;
+@@ -659,9 +702,25 @@ int dokernel( void )
+ 				break; /* FIXME: handle unknown/unhandled sock types here */
+ 			case SS_DEAD:
+ 			case SS_CLOSED:
+-				if ( sm.s.s_type == SOCKTYPE_UDP ){
+-					uip_udp_remove(m->conn);
+-					rel_map(m->lcn);
++				if ( sm.s.s_type == SOCKTYPE_UDP ||
++				     sm.s.s_type == SOCKTYPE_RAW ){
++					/* never connected: no uIP side */
++					if ( m->conn && sm.s.s_type == SOCKTYPE_UDP )
++						uip_udp_remove(m->conn);
++					else if ( m->conn )
++						uip_raw_remove((struct uip_raw_conn *)m->conn);
++					rel_map( sm.sd.lcn );
++					ne.data = SS_DEAD;
++					ksend(NE_UNHOOK);
++					break;
++				}
++				/* A listening socket, or one that never got as
++				   far as a connection: nothing in uIP to wait
++				   for, unhook it now */
++				if ( (m->flags & LINK_LISTEN) || !m->conn ) {
++					if ( m->flags & LINK_LISTEN )
++						uip_unlisten( m->port );
++					rel_map( sm.sd.lcn );
+ 					ne.data = SS_DEAD;
+ 					ksend(NE_UNHOOK);
+ 					break;
+@@ -682,9 +741,10 @@ int dokernel( void )
+ 				m->conn->userrequest = 1;
+ 				break;
+ 			case SS_LISTENING:
+-				/* htons here? */
++				/* ports are kept in network order, as uIP does */
+ 				uip_listen( sm.s.src_addr.sa.sin.sin_port );
+ 				m->port = sm.s.src_addr.sa.sin.sin_port;
++				m->flags |= LINK_LISTEN;
+ 				ne.data = SS_LISTENING;
+ 				ksend( NE_NEWSTATE );
+ 				break;
+@@ -1065,6 +1125,18 @@ int main( int argc, char *argv[] )
+ 		exit_err( "cannot init net device\n");
+ 	}
+ 
++	/* netd -d: running, so detach; the exit status tells /etc/rc
++	   whether the network is up */
++	if (argc > 1 && !strcmp(argv[1], "-d")) {
++		int pid = fork();
++		if (pid < 0)
++			exit_err("cannot fork\n");
++		if (pid)
++			_exit(0);
++		setpgrp();
++		signal(SIGINT, SIG_IGN);
++	}
++
+ 	while(1) {
+ 		int a,b;
+ 		a = dokernel();
+diff --git a/Applications/netd/netd.h b/Applications/netd/netd.h
+index 681952d72..d17a80b88 100644
+--- a/Applications/netd/netd.h
++++ b/Applications/netd/netd.h
+@@ -19,6 +19,7 @@ struct link{
+                                internally to uIP still */
+ #define LINK_UNBIND 32	    /* The kernel wants netd to confirm this link is
+                                dead and will receive no more messages */
++#define LINK_LISTEN 64	    /* A listening socket */
+     uint8_t socketn;        /* Kernel's socket no */
+     uint8_t lcn;            /* Kernel's idea of lcn ???*/
+     struct uip_conn *conn;  /* uIP's idea of lcn */
+diff --git a/Applications/netd/telnetd.c b/Applications/netd/telnetd.c
+new file mode 100644
+index 000000000..dc1e85719
+--- /dev/null
++++ b/Applications/netd/telnetd.c
+@@ -0,0 +1,317 @@
++/*
++ * telnetd - a small telnet server for Fuzix: logs a user in over TCP
++ * port 23 and runs their shell.
++ *
++ * Fuzix has no pseudo terminals here, so the shell talks to pipes and a
++ * relay process sits between them and the connection:
++ *
++ *   network -> relay: telnet commands removed, CR LF and CR NUL become
++ *              a newline, IAC IP (^C at the client) and IAC BRK send
++ *              SIGINT to the shell's process group
++ *   shell -> network: newlines become CR LF
++ *
++ * The client keeps its default line mode: it echoes and edits lines
++ * itself, which is what a shell reading a pipe needs.  The relay polls
++ * both sides (no select() in this kernel), with a short sleep when idle.
++ *
++ * telnetd [port]   default 23.  Run it in the background from /etc/rc.
++ */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <errno.h>
++#include <signal.h>
++#include <pwd.h>
++#include <sys/wait.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++
++#define IAC	255
++#define DONT	254
++#define DO	253
++#define WONT	252
++#define WILL	251
++#define SB	250
++#define BRK	243
++#define IP	244
++#define SE	240
++
++static int net;			/* the connection */
++static int shell_pid;
++
++static void netputs(const char *s)
++{
++	write(net, s, strlen(s));
++}
++
++/* Write shell output to the network, newline -> CR LF */
++static void to_net(const char *p, int n)
++{
++	char out[256];
++	int o = 0;
++	while (n--) {
++		char c = *p++;
++		if (c == '\n')
++			out[o++] = '\r';
++		else if ((unsigned char)c == IAC)
++			out[o++] = (char)IAC;	/* escape it */
++		out[o++] = c;
++		if (o >= (int)sizeof(out) - 2) {
++			write(net, out, o);
++			o = 0;
++		}
++	}
++	if (o)
++		write(net, out, o);
++}
++
++/* Network input state machine: telnet commands, line ends */
++static int tstate;
++#define TS_DATA	0
++#define TS_IAC	1
++#define TS_OPT	2
++#define TS_SB	3
++#define TS_SBIAC 4
++#define TS_CR	5
++
++/* Returns the number of bytes for the shell left in out[] */
++static int from_net(const unsigned char *p, int n, char *out)
++{
++	int o = 0;
++	while (n--) {
++		unsigned char c = *p++;
++		switch (tstate) {
++		case TS_IAC:
++			tstate = TS_DATA;
++			if (c >= WILL && c <= DONT)
++				tstate = TS_OPT;
++			else if (c == SB)
++				tstate = TS_SB;
++			else if (c == IP || c == BRK) {
++				if (shell_pid > 0)
++					kill(-shell_pid, SIGINT);
++			} else if (c == IAC)
++				out[o++] = (char)c;
++			continue;
++		case TS_OPT:		/* we agree to nothing */
++			tstate = TS_DATA;
++			continue;
++		case TS_SB:
++			if (c == IAC)
++				tstate = TS_SBIAC;
++			continue;
++		case TS_SBIAC:
++			tstate = c == SE ? TS_DATA : TS_SB;
++			continue;
++		case TS_CR:
++			tstate = TS_DATA;
++			if (c == '\n' || c == 0)
++				continue;	/* CR LF, CR NUL: one newline */
++			break;
++		}
++		if (c == IAC) {
++			tstate = TS_IAC;
++			continue;
++		}
++		if (c == '\r') {
++			out[o++] = '\n';
++			tstate = TS_CR;
++			continue;
++		}
++		if (c == 3 && shell_pid > 0) {	/* ^C sent as a character */
++			kill(-shell_pid, SIGINT);
++			continue;
++		}
++		out[o++] = c;
++	}
++	return o;
++}
++
++/* Read a line from the network (for the login prompt), no echo control */
++static int getline_net(char *buf, int len)
++{
++	unsigned char in[64];
++	char tmp[64];
++	int n = 0, i, k;
++	for (;;) {
++		k = read(net, in, sizeof(in));
++		if (k <= 0)
++			return -1;
++		k = from_net(in, k, tmp);
++		for (i = 0; i < k; i++) {
++			if (tmp[i] == '\n') {
++				buf[n] = 0;
++				return n;
++			}
++			if (n < len - 1)
++				buf[n++] = tmp[i];
++		}
++	}
++}
++
++/* Check the user against /etc/passwd; empty password: no question */
++static struct passwd *login(void)
++{
++	char name[32], pass[64];
++	struct passwd *pw;
++	int tries;
++
++	for (tries = 0; tries < 3; tries++) {
++		netputs("login: ");
++		if (getline_net(name, sizeof(name)) < 0)
++			return NULL;
++		if (!name[0])
++			continue;
++		pw = getpwnam(name);
++		if (pw && !pw->pw_passwd[0])
++			return pw;
++		netputs("Password: ");
++		if (getline_net(pass, sizeof(pass)) < 0)
++			return NULL;
++		if (pw && !strcmp(crypt(pass, pw->pw_passwd), pw->pw_passwd))
++			return pw;
++		netputs("Login incorrect\r\n");
++	}
++	return NULL;
++}
++
++static void session(void)
++{
++	int tosh[2], fromsh[2];
++	unsigned char in[128];
++	char buf[256];
++	struct passwd *pw;
++	int n, idle;
++	char *shell;
++	static char env_home[64], env_user[40];
++	char *envp[5];
++	char *argv[2];
++
++	netputs("\r\nFuzix on a PDP-11\r\n\r\n");
++	pw = login();
++	if (pw == NULL)
++		exit(1);
++
++	if (pipe(tosh) < 0 || pipe(fromsh) < 0) {
++		netputs("telnetd: no pipes\r\n");
++		exit(1);
++	}
++	shell_pid = fork();
++	if (shell_pid < 0) {
++		netputs("telnetd: cannot fork\r\n");
++		exit(1);
++	}
++	if (shell_pid == 0) {
++		setpgrp();
++		dup2(tosh[0], 0);
++		dup2(fromsh[1], 1);
++		dup2(fromsh[1], 2);
++		close(tosh[0]);
++		close(tosh[1]);
++		close(fromsh[0]);
++		close(fromsh[1]);
++		close(net);
++		setgid(pw->pw_gid);
++		setuid(pw->pw_uid);
++		chdir(pw->pw_dir);
++		snprintf(env_home, sizeof(env_home), "HOME=%s", pw->pw_dir);
++		snprintf(env_user, sizeof(env_user), "USER=%s", pw->pw_name);
++		envp[0] = "PATH=/bin:/usr/bin";
++		envp[1] = env_home;
++		envp[2] = env_user;
++		envp[3] = "TERM=dumb";
++		envp[4] = NULL;
++		shell = pw->pw_shell[0] ? pw->pw_shell : "/bin/sh";
++		/* "-sh" would read a profile; plain sh, interactive */
++		argv[0] = "sh";
++		argv[1] = NULL;
++		execve(shell, argv, envp);
++		_exit(127);
++	}
++	close(tosh[0]);
++	close(fromsh[1]);
++
++	fcntl(net, F_SETFL, O_NDELAY);
++	fcntl(fromsh[0], F_SETFL, O_NDELAY);
++	signal(SIGPIPE, SIG_IGN);
++
++	idle = 0;
++	for (;;) {
++		int busy = 0;
++		n = read(net, in, sizeof(in));
++		if (n == 0)
++			break;		/* connection closed */
++		if (n > 0) {
++			n = from_net(in, n, buf);
++			if (n && write(tosh[1], buf, n) < 0)
++				break;
++			busy = 1;
++		} else if (errno != EAGAIN)
++			break;
++		n = read(fromsh[0], buf, sizeof(buf));
++		if (n == 0)
++			break;		/* the shell has exited */
++		if (n > 0) {
++			to_net(buf, n);
++			busy = 1;
++		}
++		if (busy)
++			idle = 0;
++		else if (idle < 10)
++			idle++;
++		/* poll quickly while there is traffic, slower when idle */
++		if (!busy)
++			usleep(idle < 10 ? 20000 : 100000);
++	}
++	kill(-shell_pid, SIGHUP);
++	close(tosh[1]);
++	close(fromsh[0]);
++	close(net);
++	while (wait(NULL) > 0)
++		;
++	exit(0);
++}
++
++int main(int argc, char *argv[])
++{
++	struct sockaddr_in addr;
++	int lfd, pid;
++
++	memset(&addr, 0, sizeof(addr));
++	addr.sin_family = AF_INET;
++	addr.sin_port = htons(argc > 1 ? atoi(argv[1]) : 23);
++	lfd = socket(AF_INET, SOCK_STREAM, 0);
++	if (lfd < 0) {
++		perror("telnetd: socket");
++		return 1;
++	}
++	if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
++		perror("telnetd: bind");
++		return 1;
++	}
++	if (listen(lfd, 2) < 0) {
++		perror("telnetd: listen");
++		return 1;
++	}
++	signal(SIGCHLD, SIG_IGN);
++	for (;;) {
++		net = accept(lfd, NULL, NULL);
++		if (net < 0) {
++			if (errno != EINTR)
++				sleep(1);
++			continue;
++		}
++		pid = fork();
++		if (pid == 0) {
++			close(lfd);
++			session();
++		}
++		close(net);
++		/* collect finished sessions */
++		while (waitpid(-1, NULL, WNOHANG) > 0)
++			;
++	}
++}
+diff --git a/Applications/netd/uip.c b/Applications/netd/uip.c
+index 3cd8ca9b0..793baf268 100644
+--- a/Applications/netd/uip.c
++++ b/Applications/netd/uip.c
+@@ -1478,6 +1478,9 @@ uip_process(uint8_t flag)
+   uip_connr->rport = BUF->srcport;
+   uip_ipaddr_copy(&uip_connr->ripaddr, &BUF->srcipaddr);
+   uip_connr->tcpstateflags = UIP_SYN_RCVD;
++  /* A passive open: no netd link yet (netd_appcall makes one) */
++  uip_connr->appstate = NO_LINK;
++  uip_connr->userrequest = 0;
+ 
+   uip_connr->snd_nxt[0] = iss[0];
+   uip_connr->snd_nxt[1] = iss[1];
+diff --git a/Kernel/dev/net/net_native.c b/Kernel/dev/net/net_native.c
+index ad29f1608..b4fe63549 100644
+--- a/Kernel/dev/net/net_native.c
++++ b/Kernel/dev/net/net_native.c
+@@ -225,6 +225,49 @@ int netdev_read(uint8_t flag)
+  *	The ioctl interface at the moment is simply the initialization
+  *	function.
+  */
++/*
++ *	The daemon has accepted a connection for a listening socket: make
++ *	a socket for it, already connected, for accept() to collect.
++ */
++static int netn_accept(char *data)
++{
++	struct netaccept na;
++	struct socket *ls, *ns;
++	struct sockdata *sd;
++	uint8_t i;
++
++	if (uget(data, &na, sizeof(na)))
++		return -1;
++	ls = sockets + na.listener;
++	if (na.listener >= NSOCKET || ls->s_state != SS_LISTENING) {
++		udata.u_error = EINVAL;
++		return -1;
++	}
++	for (i = 0; i < NSOCKET; i++)
++		if (!sockdata[i].socket)
++			break;
++	if (i == NSOCKET) {
++		udata.u_error = ENOBUFS;
++		return -1;
++	}
++	ns = sockets + i;
++	sd = sockdata + i;
++	memset(sd, 0, sizeof(*sd));
++	sd->socket = ns;
++	sd->lcn = na.lcn;
++	memcpy(ns, ls, sizeof(*ns));
++	ns->s_num = i;
++	ns->s_state = SS_CONNECTED;
++	ns->s_iflags = 0;
++	ns->s_ino = NULL;
++	ns->dst_addr.sa.sin.sin_port = na.port;
++	ns->dst_addr.sa.sin.sin_addr.s_addr = na.addr;
++	ns->dst_len = sizeof(struct sockaddr_in);
++	ns->s_parent = na.listener;
++	wakeup_all(ls);
++	return i;
++}
++
+ int netdev_ioctl(uarg_t request, char *data)
+ {
+ 	int16_t fd;
+@@ -254,6 +297,8 @@ int netdev_ioctl(uarg_t request, char *data)
+ 				return -1;
+ 			return 0;
+ #endif
++		case NET_ACCEPT:
++			return netn_accept(data);
+ 		case NET_MAC:
+ 			if (uget(data, mac_addr, 6U))
+ 				return -1;
+@@ -685,7 +730,9 @@ int netproto_autobind(struct socket *s)
+  */
+ int netproto_bind(struct socket *s)
+ {
+-	memcpy(&s->dst_addr, &udata.u_net.addrbuf, sizeof(struct ksockaddr));
++	/* bind() names the local end */
++	memcpy(&s->src_addr, &udata.u_net.addrbuf, sizeof(struct ksockaddr));
++	s->src_len = udata.u_net.addrlen;
+ 	return netn_synchronous_event(s, SS_BOUND);
+ }
+ 
+diff --git a/Kernel/include/net_native.h b/Kernel/include/net_native.h
+index 9dbd0bd71..801e6d8ee 100644
+--- a/Kernel/include/net_native.h
++++ b/Kernel/include/net_native.h
+@@ -75,6 +75,16 @@ struct netevent {
+ #define NET_IPADDR	0x4405
+ #define NET_MASK	0x4406
+ #define NET_GATEWAY	0x4407
++#define NET_ACCEPT	0x4408	/* daemon: a connection came in on a listener */
++
++/* NET_ACCEPT argument: the kernel makes a socket for the new connection,
++   hangs it on the listening socket for accept(), and returns its number */
++struct netaccept {
++	uint8_t listener;	/* listening socket */
++	uint8_t lcn;		/* the daemon's link for the new connection */
++	uint16_t port;		/* remote port, network order */
++	uint32_t addr;		/* remote address, network order */
++};
+ 
+ int netdev_write(uint8_t flag);
+ int netdev_read(uint8_t flag);
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index a4f4e423d..038c915aa 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -210,7 +210,7 @@ make_fuz levee
+ NETDIR="$FUZIXDIR/Applications/netd"
+ echo "Building netd and network programs..."
+ SAVED_CFLAGS="$CFLAGS"
+-CFLAGS="$CFLAGS -DNETD_LITTLE_ENDIAN -I$NETDIR"
++CFLAGS="$CFLAGS -DNETD_LITTLE_ENDIAN -I$NETDIR $NETD_CFLAGS"
+ build_util netd $(for f in netd uip uiplib timer clock-arch uip_arp eth; do echo "$NETDIR/$f.c"; done)
+ make_fuz netd
+ NET_BINS="netd"
+@@ -219,7 +219,7 @@ for app in telnet ping ntpdate htget dig; do
+     make_fuz $app
+     NET_BINS="$NET_BINS $app"
+ done
+-for app in httpd ifconfig echoping; do
++for app in httpd telnetd ifconfig echoping; do
+     build_util $app "$NETDIR/$app.c"
+     make_fuz $app
+     NET_BINS="$NET_BINS $app"
+@@ -241,6 +241,26 @@ NETEOF
+ cat > "$BUILDDIR/resolv.conf" <<'RESEOF'
+ nameserver 10.0.2.3
+ RESEOF
++# /etc/rc: run by init at boot
++cat > "$BUILDDIR/rc" <<'RCEOF'
++# /etc/rc - run once by init at boot, before the login shells.
++# The network: netd -d returns once the DELQA is running.
++if netd -d
++then
++	echo "network: `ifconfig | grep inet`"
++	telnetd &
++	httpd &
++fi
++RCEOF
++cat > "$BUILDDIR/index.html" <<'WWWEOF'
++<html><head><title>PDP-11</title></head>
++<body>
++<h1>Hello from a PDP-11</h1>
++<p>This page comes from a DEC PDP-11/23 running Fuzix, a small Unix,
++on its DEQNA/DELQA Ethernet controller (emulated by a QBone).</p>
++<p>Telnet to this machine to log in.</p>
++</body></html>
++WWWEOF
+ 
+ # --- Assemble bootloader ---
+ echo "Assembling bootloader..."
+@@ -444,6 +464,15 @@ bget $BUILDDIR/netrc netrc
+ chmod 644 netrc
+ bget $BUILDDIR/resolv.conf resolv.conf
+ chmod 644 resolv.conf
++bget $BUILDDIR/rc rc
++chmod 644 rc
++cd /
++mkdir www
++chmod 755 www
++cd /www
++bget $BUILDDIR/index.html index.html
++chmod 644 index.html
++cd /etc
+ cd /usr
+ mkdir lib
+ chmod 755 lib
+diff --git a/Kernel/platform/platform-pdp11dec/config.h b/Kernel/platform/platform-pdp11dec/config.h
+index 451743dbf..eed095d92 100644
+--- a/Kernel/platform/platform-pdp11dec/config.h
++++ b/Kernel/platform/platform-pdp11dec/config.h
+@@ -38,7 +38,7 @@
+ #define BANK0_CLICK	0x300		/* first bank at physical 0xC000 */
+ 
+ #define PTABSIZE	12
+-#define ITABSIZE	24	/* In-core inodes */
++#define ITABSIZE	20	/* In-core inodes */
+ #define OFTSIZE		20	/* Open file table */
+ 
+ #define PROGBASE	0x2000UL
+diff --git a/Kernel/platform/platform-pdp11dec/init.c b/Kernel/platform/platform-pdp11dec/init.c
+index e537623ac..9268c727d 100644
+--- a/Kernel/platform/platform-pdp11dec/init.c
++++ b/Kernel/platform/platform-pdp11dec/init.c
+@@ -76,6 +76,18 @@ int main(int argc, char **argv)
+ 	dup(0);				/* fd 1 = stdout */
+ 	dup(0);				/* fd 2 = stderr */
+ 
++	/* /etc/rc: start-up commands (the network, for one) */
++	if (access("/etc/rc", 0) == 0) {
++		pid = fork();
++		if (pid == 0) {
++			execl("/bin/sh", "sh", "/etc/rc", (char *)0);
++			_exit(1);
++		}
++		if (pid > 0)
++			while (wait(&status) != pid)
++				;
++	}
++
+ 	/* A terminal that cannot be opened (no second DL11) is
+ 	   marked -2 and never gets a shell. */
+ 	for (t = 0; t < NTTY; t++) {
+diff --git a/Kernel/syscall_net.c b/Kernel/syscall_net.c
+index 629a55168..0658b0412 100644
+--- a/Kernel/syscall_net.c
++++ b/Kernel/syscall_net.c
+@@ -80,6 +80,7 @@ static int make_socket(uint16_t sock)
+ 		goto noalloc;
+ 	/* All good - now set it up */
+ 	ino->c_node.i_mode = F_SOCK | 0777;
++	IN2SOCK(ino) = sock;		/* which socket this inode is */
+ 	ino->c_readers = 1;
+ 	ino->c_writers = 1;
+ 
+diff --git a/Library/include/sys/net_native.h b/Library/include/sys/net_native.h
+index bd38911b7..8f399111c 100644
+--- a/Library/include/sys/net_native.h
++++ b/Library/include/sys/net_native.h
+@@ -75,6 +75,16 @@ struct netevent {
+ #define NET_IPADDR	0x4405
+ #define NET_MASK	0x4406
+ #define NET_GATEWAY	0x4407
++#define NET_ACCEPT	0x4408	/* daemon: a connection came in on a listener */
++
++/* NET_ACCEPT argument: the kernel makes a socket for the new connection,
++   hangs it on the listening socket for accept(), and returns its number */
++struct netaccept {
++	uint8_t listener;	/* listening socket */
++	uint8_t lcn;		/* the daemon's link for the new connection */
++	uint16_t port;		/* remote port, network order */
++	uint32_t addr;		/* remote address, network order */
++};
+ 
+ int netdev_write(void);
+ int netdev_read(uint8_t flag);
+-- 
+2.56.0
+

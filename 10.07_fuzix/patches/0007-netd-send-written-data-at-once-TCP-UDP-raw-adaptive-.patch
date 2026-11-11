@@ -1,0 +1,112 @@
+From b3d1be9e12e2c28da8a2bb2a4809a710093dad7b Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Tue, 10 Nov 2026 19:16:54 -0600
+Subject: [PATCH 07/13] netd: send written data at once (TCP, UDP, raw),
+ adaptive idle; disk: /dev/proc, /dev/zero minors
+
+---
+ Applications/netd/netd.c                      | 41 ++++++++++++++++++-
+ .../platform-pdp11dec/build_fuzix_disk.sh     |  5 ++-
+ 2 files changed, 42 insertions(+), 4 deletions(-)
+
+diff --git a/Applications/netd/netd.c b/Applications/netd/netd.c
+index fb772cb34..359cfacf8 100644
+--- a/Applications/netd/netd.c
++++ b/Applications/netd/netd.c
+@@ -75,6 +75,7 @@ int freeptr = 0;
+ int looplen = 0;
+ 
+ uint16_t activity;		/* Must be enough bits for NSOCKET */
++uint8_t kick_dgram;		/* UDP/raw data waiting to be sent */
+ 
+ /* print an error message */
+ void printe( char *mesg )
+@@ -760,6 +761,13 @@ int dokernel( void )
+ 			last = (m->tend-1) & (NSOCKBUF-1);
+ 			/* tsize is for udp only, but copy it anyway */
+ 			m->tsize[last] = sm.sd.tlen[last];
++			/* send it now, not at the next periodic timer */
++			if ( m->conn ){
++				if ( sm.s.s_type == SOCKTYPE_TCP )
++					activity |= (1 << c);
++				else
++					kick_dgram = 1;
++			}
+ 		}
+ 		if ( sm.sd.event & NEV_READ ){
+ 			m->rstart = sm.sd.rbuf;
+@@ -864,8 +872,29 @@ int douip( void )
+ 		}
+ 		activity = 0;
+ 	}
++	/* Datagrams written since: run the UDP and raw "periodic" sends */
++	if (kick_dgram && !timer_expired(&periodic_timer)) {
++		kick_dgram = 0;
++		for (i = 0; i < UIP_UDP_CONNS; i++) {
++			uip_udp_periodic(i);
++			if (uip_len > 0) {
++				if (has_arp)
++					uip_arp_out();
++				send_or_loop();
++			}
++		}
++		for (i = 0; i < UIP_RAW_CONNS; i++) {
++			uip_raw_periodic(i);
++			if (uip_len > 0) {
++				if (has_arp)
++					uip_arp_out();
++				send_or_loop();
++			}
++		}
++	}
+ 	if (timer_expired(&periodic_timer)) {
+ 		timer_reset(&periodic_timer);
++		kick_dgram = 0;
+ 		for (i = 0; i < UIP_CONNS; i++) {
+ 			uip_periodic(i);
+ 			if (uip_len > 0) {
+@@ -1139,6 +1168,7 @@ int main( int argc, char *argv[] )
+ 
+ 	while(1) {
+ 		int a,b;
++		static uint8_t idle;
+ 		a = dokernel();
+ 		b = douip();
+ 		/* FIXME: we should probably run blocking on the /dev/net
+@@ -1147,8 +1177,15 @@ int main( int argc, char *argv[] )
+ 		   net wakeups are not cheap */
+ 		/* a driver can return -1 to indicate that device_read will
+ 		   do the relevnt delays/polling */
+-		if( ! (a || b) )
+-			_pause(3);
++		/* Nothing to do: keep looking for a few rounds (replies
++		   tend to follow requests closely), then sleep a tenth of
++		   a second, the shortest sleep there is. */
++		if (a || b)
++			idle = 0;
++		else if (++idle > 4) {
++			idle = 4;
++			_pause(1);
++		}
+ 	}
+ 	cleanup(0);
+ }
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index 038c915aa..2723a6651 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -340,8 +340,9 @@ mknod tty1 020666 513
+ mknod tty2 020666 514
+ mknod console 020666 513
+ mknod null 020666 1024
+-mknod zero 020666 1029
+-mknod proc 020666 1025
++mknod zero 020666 1026
++mknod proc 020666 1027
++mknod kmem 020640 1025
+ mknod hd0 060660 0
+ mknod hd1 060660 1
+ mknod eth 020666 2048
+-- 
+2.56.0
+

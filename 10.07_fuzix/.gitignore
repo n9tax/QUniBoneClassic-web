@@ -1,0 +1,3 @@
+# the unpacked disk (your files live here) and the build tree
+/fuzix.rl02
+/work/
