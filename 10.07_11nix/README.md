@@ -75,8 +75,7 @@ netmask 255.255.255.0
 ```
 
 and your DNS server in `/etc/resolv.conf` (`nameserver 192.168.1.1`). Then
-reboot (or kill `netd` and start `netd -d`, `telnetd &` and `httpd &` again,
-as `/etc/rc` does). There is no DHCP. The Ethernet address is the DELQA's.
+`sync`, and boot again (START, `10000g`). There is no DHCP. The Ethernet address is the DELQA's.
 
 From another computer on the LAN (not the BeagleBone itself):
 
@@ -90,13 +89,15 @@ On the PDP-11: `ping host` (until ctrl-C), `dig name`,
 ### Stopping
 
 Type `sync`, then halt the PDP-11 (HALT on the front panel, or in the web
-panel). A kernel panic halts the processor too: `10000g` boots again.
+panel). A kernel panic halts the processor too. To boot again, START the
+configuration again (that reloads the RL boot loader, which the 11nix kernel
+overwrites), then `10000g`.
 
 If the machine stopped without `sync`, the next boot finds the file system
 dirty and mounts it read-only (`warning: mounting dirty file system`). Type
 `fsck /dev/hd0` and answer `y` to its questions (sockets that were open show
 up as inodes "not of correct type": zap them). When it has repaired the disk
-it halts the processor: `10000g` boots again, read-write.
+it halts the processor: START again and `10000g` boots, read-write.
 
 ## Running it in SIMH
 
