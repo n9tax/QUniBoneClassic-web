@@ -27,6 +27,7 @@
 
 #include <stdint.h>
 #include "qunibusdevice.hpp"
+#include "timeout.hpp"
 #include "delqa_core.hpp"
 #include "ethernet_raw.hpp"
 
@@ -43,6 +44,13 @@ private:
 
 	bool parse_mac(const std::string &text, uint8_t *mac);
 	void update_stats(void);
+
+	// workers sleep when a pass did nothing (see delqa.cpp)
+	struct idle_guard_t {
+		unsigned count;
+		timeout_c window;
+	};
+	void idle_guard(idle_guard_t &g, bool progress, uint64_t pass_ns, const char *what);
 
 public:
 	parameter_string_c ifname = parameter_string_c(this, "interface", "if", false,

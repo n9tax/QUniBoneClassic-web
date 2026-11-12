@@ -48,8 +48,8 @@
 #include <stddef.h>
 #include <deque>
 #include <vector>
+#include <string>
 #include <mutex>
-#include <condition_variable>
 
 // CSR bits
 #define DELQA_CSR_RE	0x0001	// receiver enable
@@ -146,6 +146,7 @@ public:
 	static const unsigned RXQ_MAX = 64; // frames held while the host has no buffers
 
 	delqa_core_c(delqa_bus_if *bus);
+	~delqa_core_c();
 
 	void set_mac(const uint8_t *mac);
 	void get_mac(uint8_t *mac);
@@ -161,7 +162,9 @@ public:
 
 	// worker thread: wait for something to do, then do it (DMA without locks held)
 	bool wait_for_work(unsigned timeout_ms);
-	void service(void);
+	bool service(void); // true: did something
+	// state for diagnostics: CSR, pending work, queue
+	std::string state_text(void);
 
 	// current register values as seen by the PDP-11
 	uint16_t dati(unsigned index);
@@ -178,7 +181,10 @@ public:
 private:
 	delqa_bus_if *bus;
 	std::mutex mtx;
-	std::condition_variable cv;
+	// wakes the worker: an eventfd. (std::condition_variable::wait_for did not
+	// sleep inside demo on the BeagleBone and spun at realtime priority.)
+	int wake_fd;
+	void wake(void);
 
 	uint8_t mac[6];
 	bool link_ok;

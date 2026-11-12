@@ -41,7 +41,9 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <chrono>
+#include <poll.h>
+#include <unistd.h>
+#include <sys/eventfd.h>
 
 #include "delqa_core.hpp"
 
@@ -63,6 +65,19 @@ delqa_core_c::delqa_core_c(delqa_bus_if *_bus) {
 	rx_used = 0;
 	warned_bootrom = false;
 	warned_oversize = 0;
+	wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+}
+
+delqa_core_c::~delqa_core_c() {
+	if (wake_fd >= 0)
+		close(wake_fd);
+}
+
+void delqa_core_c::wake(void) {
+	uint64_t one = 1;
+	if (wake_fd >= 0 && write(wake_fd, &one, sizeof(one)) < 0) {
+		// counter full: the worker is awake anyway
+	}
 }
 
 void delqa_core_c::logf(int level, const char *fmt, ...) {
@@ -254,7 +269,7 @@ void delqa_core_c::bus_write(unsigned index, uint16_t value, access_e access) {
 	publish_locked();
 	lock.unlock();
 	if (kick)
-		cv.notify_all();
+		wake();
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +332,7 @@ bool delqa_core_c::receive_frame(const uint8_t *frame, unsigned len) {
 	bool kick = rx_pending_locked();
 	lock.unlock();
 	if (kick)
-		cv.notify_all();
+		wake();
 	return true;
 }
 
@@ -367,18 +382,46 @@ void delqa_core_c::process_setup_locked(const std::vector<uint8_t> &pkt) {
 
 bool delqa_core_c::wait_for_work(unsigned timeout_ms) {
 	std::unique_lock<std::mutex> lock(mtx);
-	return cv.wait_for(lock, std::chrono::milliseconds(timeout_ms),
-			[this] {return tx_kick || rx_pending_locked();});
+	if (tx_kick || rx_pending_locked())
+		return true;
+	lock.unlock();
+	// A wake() after the check above leaves the eventfd readable: not lost.
+	struct pollfd p;
+	p.fd = wake_fd;
+	p.events = POLLIN;
+	p.revents = 0;
+	if (wake_fd >= 0)
+		poll(&p, 1, (int) timeout_ms);
+	else
+		usleep(timeout_ms * 1000);
+	uint64_t count;
+	if (wake_fd >= 0 && read(wake_fd, &count, sizeof(count)) < 0) {
+		// nothing pending (EAGAIN)
+	}
+	lock.lock();
+	return tx_kick || rx_pending_locked();
 }
 
-void delqa_core_c::service(void) {
+bool delqa_core_c::service(void) {
 	// loopback and setup frames produced by the transmitter are received in turn
+	bool any = false;
 	for (unsigned guard = 0; guard < 1000; guard++) {
 		bool did_tx = process_tx();
 		bool did_rx = process_rx();
 		if (!did_tx && !did_rx)
 			break;
+		any = true;
 	}
+	return any;
+}
+
+std::string delqa_core_c::state_text(void) {
+	std::lock_guard<std::mutex> lock(mtx);
+	char buf[160];
+	snprintf(buf, sizeof(buf), "CSR %06o, tx_kick %d, rx queue %u, rx pending %d, RBDL %06o, TBDL %06o",
+			csr, tx_kick ? 1 : 0, (unsigned) rxq.size(), rx_pending_locked() ? 1 : 0,
+			(unsigned) rbdl_ba, (unsigned) tbdl_ba);
+	return buf;
 }
 
 // DMA to/from nonexistent memory

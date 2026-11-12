@@ -179,27 +179,57 @@ void delqa_c::update_stats(void) {
 	rx_dropped.value = (unsigned) core.stat_rx_dropped;
 }
 
+// A worker must never loop without sleeping: it runs at realtime priority on
+// a single core BeagleBone, and a busy loop there starves Linux (ssh, the web
+// panel). If a pass did nothing and took less than a millisecond, sleep a
+// millisecond, and report it when it happens often.
+void delqa_c::idle_guard(idle_guard_t &g, bool progress, uint64_t pass_ns, const char *what) {
+	if (progress || pass_ns >= 1000000)
+		return;
+	timeout_c::wait_ms(1);
+	g.count++;
+	if (g.window.elapsed_ms() >= 1000) {
+		if (g.count > 100)
+			WARNING("delqa: %s woke %u times in a second with nothing to do (%s)", what,
+					g.count, core.state_text().c_str());
+		g.count = 0;
+		g.window.start_ms(0);
+	}
+}
+
 void delqa_c::worker(unsigned instance) {
-	worker_init_realtime_priority(rt_device);
+	idle_guard_t guard;
+	guard.count = 0;
+	guard.window.start_ms(0);
+	timeout_c pass;
 	if (instance == 0) {
+		// controller: DMA and interrupts, realtime
+		worker_init_realtime_priority(rt_device);
 		while (!workers_terminate) {
+			pass.start_ms(0);
+			bool did = false;
 			if (core.wait_for_work(100) && !qunibusadapter->line_INIT)
-				core.service();
+				did = core.service();
 			update_stats();
+			idle_guard(guard, did, pass.elapsed_ns(), "controller");
 		}
 	} else {
+		// network receive: frames wait in the socket buffer and the queue, so
+		// normal priority is enough, and it keeps clear of ssh and the panel
+		worker_init_realtime_priority(none_rt);
 		static uint8_t buffer[2048 + 64];
-		timeout_c timeout;
 		while (!workers_terminate) {
+			pass.start_ms(0);
 			int n = eth.receive(buffer, sizeof(buffer), 100);
 			if (n < 0) {
-				timeout.wait_ms(100); // interface closed or down
+				timeout_c::wait_ms(100); // interface closed or down
 				continue;
 			}
 			if (n > (int) sizeof(buffer)) // truncated: count as oversize
 				n = sizeof(buffer);
 			if (n > 0)
 				core.receive_frame(buffer, (unsigned) n);
+			idle_guard(guard, n > 0, pass.elapsed_ns(), "receiver");
 		}
 	}
 }
