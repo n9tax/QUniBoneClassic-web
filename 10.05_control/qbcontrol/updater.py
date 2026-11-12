@@ -80,7 +80,13 @@ def running():
     try:
         pid = int(_read("pid").strip())
     except ValueError:
-        return False
+        # no pid yet: the wrapper may still be starting (systemd-run is slow
+        # on a BeagleBone)
+        try:
+            started = json.loads(_read("info", "{}")).get("started") or 0
+        except ValueError:
+            started = 0
+        return time.time() - started < 60
     return _alive(pid)
 
 
@@ -134,13 +140,20 @@ def start(mode):
     with open(_path("info"), "w") as f:
         json.dump({"mode": mode, "started": time.time()}, f)
 
+    # The commands go into a small script file, not on a command line:
+    # systemd-run expands "$" in its command (it made "echo $$" write "$"
+    # into the pid file, and the page said FAILED while the update ran on).
+    # Its name contains SCRIPT_NAME, which _alive() looks for.
     q = shlex.quote
     home = pwd.getpwuid(os.getuid()).pw_dir
-    inner = ("echo $$ > {pid}; export HOME={home}; cd {top} && "
-             "bash ./{name} {flag} > {log} 2>&1 < /dev/null; echo $? > {exit}").format(
-        pid=q(_path("pid")), home=q(home), top=q(core.QUNIBONE_HOME), name=SCRIPT_NAME,
-        flag="-n" if mode == "check" else "-y", log=q(_path("log")), exit=q(_path("exit")))
-    argv = ["/bin/bash", "-c", inner]
+    wrapper = _path("run-" + SCRIPT_NAME)
+    with open(wrapper, "w") as f:
+        f.write("echo $$ > {pid}\nexport HOME={home}\ncd {top} && "
+                "bash ./{name} {flag} > {log} 2>&1 < /dev/null\necho $? > {exit}\n".format(
+                    pid=q(_path("pid")), home=q(home), top=q(core.QUNIBONE_HOME),
+                    name=SCRIPT_NAME, flag="-n" if mode == "check" else "-y",
+                    log=q(_path("log")), exit=q(_path("exit"))))
+    argv = ["/bin/bash", wrapper]
     if os.geteuid() == 0 and shutil.which("systemd-run") and os.path.isdir("/run/systemd/system"):
         # outside the qbcontrol service: survives "systemctl restart qbcontrol"
         argv = ["systemd-run", "--unit", "qbweb-update-%d" % int(time.time()),
