@@ -1,7 +1,7 @@
 From 77c20cd0e7e71330dc2ab9656c32a29ba02ddac3 Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 20:35:36 -0600
-Subject: [PATCH 10/15] ntpdate: port in network order, big-endian NTP time, 64
+Subject: [PATCH 10/16] ntpdate: port in network order, big-endian NTP time, 64
  bit time_t; rc sets the clock
 
 ---

@@ -1,7 +1,7 @@
 From cc18347f573833258a8c460515d6203cfb3e5ce0 Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 17:32:46 -0600
-Subject: [PATCH 03/15] platform-pdp11dec: Fuzix for DEC MMU PDP-11s (11/23
+Subject: [PATCH 03/16] platform-pdp11dec: Fuzix for DEC MMU PDP-11s (11/23
  ...): 48 KB kernel, MFPI/MTPI user access, banks sized from memory, user
  traps as signals
 

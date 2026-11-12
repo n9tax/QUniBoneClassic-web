@@ -59,6 +59,10 @@ What it has:
 3. START. At the ODT prompt `@` on the PDP-11 console, type `10000g`.
 4. 11nix boots to a `#` prompt on the console: you are root.
 
+A newer `11nix.rl02.gz` from an update is only unpacked when there is no
+`11nix.rl02`: to start over with it, stop the emulation and delete
+`/root/10.07_11nix/11nix.rl02` (your files on the old disk are lost).
+
 ### The network
 
 Set the machine's address for your LAN before you use the network, on the

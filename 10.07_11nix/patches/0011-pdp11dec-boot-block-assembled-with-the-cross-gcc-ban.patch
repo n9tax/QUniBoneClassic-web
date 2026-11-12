@@ -1,7 +1,7 @@
 From 8a47932ee416cbf679d502456d5dc6d290b4ea72 Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 20:39:27 -0600
-Subject: [PATCH 11/15] pdp11dec: boot block assembled with the cross gcc;
+Subject: [PATCH 11/16] pdp11dec: boot block assembled with the cross gcc;
  banner
 
 ---

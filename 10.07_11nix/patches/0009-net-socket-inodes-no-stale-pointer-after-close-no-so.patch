@@ -1,7 +1,7 @@
 From f5e47e3927d208f15808a9e3f1d98cb35b7c7d0f Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 20:29:27 -0600
-Subject: [PATCH 09/15] net: socket inodes: no stale pointer after close, no
+Subject: [PATCH 09/16] net: socket inodes: no stale pointer after close, no
  socket number left in i_addr[0]; daemon events only for unreported changes;
  pdp11dec: panic halts to ODT
 

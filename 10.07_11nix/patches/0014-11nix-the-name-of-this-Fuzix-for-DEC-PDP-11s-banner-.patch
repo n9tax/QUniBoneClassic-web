@@ -1,7 +1,7 @@
 From 113026eb4a8031e9e102a703530b2fc03ca52d1f Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Wed, 11 Nov 2026 18:09:03 -0600
-Subject: [PATCH 14/15] 11nix: the name of this Fuzix for DEC PDP-11s (banner,
+Subject: [PATCH 14/16] 11nix: the name of this Fuzix for DEC PDP-11s (banner,
  uname, telnetd, httpd, boot block); OS_SYSNAME/OS_BANNER per platform; qe0
  prints the Ethernet address in bytes
 

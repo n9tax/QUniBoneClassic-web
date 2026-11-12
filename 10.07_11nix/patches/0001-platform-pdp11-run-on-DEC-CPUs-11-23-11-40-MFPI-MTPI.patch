@@ -1,7 +1,7 @@
 From 2e1664a53f49c77945740855e68064ac0961f720 Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 17:02:44 -0600
-Subject: [PATCH 01/15] platform-pdp11: run on DEC CPUs (11/23, 11/40):
+Subject: [PATCH 01/16] platform-pdp11: run on DEC CPUs (11/23, 11/40):
  MFPI/MTPI for the user SP, optional second DL11 and KW11-L register, GNU as
  boot block; ucp: longer lines
 

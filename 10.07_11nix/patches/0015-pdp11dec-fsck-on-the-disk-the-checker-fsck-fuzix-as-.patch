@@ -1,7 +1,7 @@
 From a381d964e897a9c6ae179976687930ebe7e26c9d Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Wed, 11 Nov 2026 18:33:40 -0600
-Subject: [PATCH 15/15] pdp11dec: fsck on the disk (the checker, fsck-fuzix, as
+Subject: [PATCH 15/16] pdp11dec: fsck on the disk (the checker, fsck-fuzix, as
  /bin/fsck)
 
 ---

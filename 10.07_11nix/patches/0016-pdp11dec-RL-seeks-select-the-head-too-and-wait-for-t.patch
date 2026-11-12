@@ -1,0 +1,228 @@
+From f3cac49c8c78a2fc4b268c8e15adf212aeb88011 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Wed, 11 Nov 2026 21:34:18 -0600
+Subject: [PATCH 16/16] pdp11dec: RL seeks select the head too, and wait for
+ the drive (boot block and driver); Get Status 013. A real RL and the QBone
+ check the head in the sector header; SIMH does not
+
+---
+ .../platform-pdp11dec/boot_fuzix_gas.S        | 67 ++++++++++++-------
+ Kernel/platform/platform-pdp11dec/dev_rl.c    | 62 +++++++++--------
+ 2 files changed, 77 insertions(+), 52 deletions(-)
+
+diff --git a/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S b/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
+index 962b24c57..982c7f79b 100644
+--- a/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
++++ b/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
+@@ -32,7 +32,7 @@ boot:
+ 	mov	$msg, r0
+ 	jsr	pc, puts
+ 
+-	clr	curcyl
++	mov	$-1, curcyl		/* unknown: the first sector seeks */
+ 	mov	$KERN_ADDR, r2		/* destination */
+ 	mov	$KERN_START, r3		/* linear sector */
+ 	mov	$KERN_NSECT, r4		/* count */
+@@ -40,7 +40,7 @@ boot:
+ next:
+ 	tstb	@$RLCS
+ 	bpl	next
+-	/* cylinder = r3 / 80, r0 = r3 % 80 */
++	/* cylinder r5 = r3 / 80, head r1, sector r0 */
+ 	mov	r3, r0
+ 	clr	r5
+ 1:	cmp	r0, $80
+@@ -48,37 +48,55 @@ next:
+ 	sub	$80, r0
+ 	inc	r5
+ 	br	1b
+-2:	cmp	r5, curcyl
++2:	clr	r1
++	cmp	r0, $40
++	blo	3f
++	sub	$40, r0
++	inc	r1
++	/* The drive selects the head with a seek, and Read Data only finds
++	   headers of the cylinder and head it is on (a real RL and the QBone
++	   check, SIMH does not): seek when either changes. */
++3:	cmp	r5, curcyl
++	bne	seek
++	cmp	r1, curhd
+ 	beq	noseek
+-
+-	/* seek: difference in bits 15:7, bit 2 = outward */
+-	mov	r5, r1
+-	sub	curcyl, r1
+-	bpl	3f
+-	neg	r1
++seek:
++	mov	r1, curhd
++	clr	r1			/* from cylinder 0 the first time */
++	tst	curcyl
++	bmi	4f
++	mov	curcyl, r1
++4:	neg	r1
++	add	r5, r1			/* r1 = target - current */
++	bmi	5f
+ 	ash	$7, r1
+-	br	4f
+-3:	ash	$7, r1
+-	bis	$4, r1
+-4:	bis	$1, r1			/* marker bit, as DEC's seek uses */
+-	mov	r1, @$RLDA
++	bis	$4, r1			/* toward higher cylinders */
++	br	6f
++5:	neg	r1
++	ash	$7, r1
++6:	bis	$1, r1			/* marker bit */
++	tst	curhd
++	beq	7f
++	bis	$020, r1		/* head select */
++7:	mov	r1, @$RLDA
+ 	mov	$6, @$RLCS		/* seek */
+-5:	tstb	@$RLCS
+-	bpl	5b
++8:	tstb	@$RLCS
++	bpl	8b
+ 	tst	@$RLCS
+ 	bmi	error
++9:	bit	$1, @$RLCS		/* wait for the drive (DRDY) */
++	beq	9b
+ 	mov	r5, curcyl
+ 
+ noseek:
+-	clr	r1
+-	cmp	r0, $40
+-	blo	6f
+-	sub	$40, r0
+-	bis	$0100, r1		/* head 1 */
+-6:	bis	r0, r1
+-	mov	r5, r0
+-	ash	$7, r0
++	/* RLDA: cylinder<15:7> head<6> sector<5:0> */
++	mov	r5, r1
++	ash	$7, r1
+ 	bis	r0, r1
++	tst	curhd
++	beq	1f
++	bis	$0100, r1
++1:
+ 	mov	r2, @$RLBA
+ 	mov	r1, @$RLDA
+ 	mov	$-128, @$RLMP		/* 128 words */
+@@ -116,3 +134,4 @@ crlf:	.asciz	"\r\n"
+ errmsg:	.asciz	"\r\nRL11 error\r\n"
+ 	.even
+ curcyl:	.word	0
++curhd:	.word	0
+diff --git a/Kernel/platform/platform-pdp11dec/dev_rl.c b/Kernel/platform/platform-pdp11dec/dev_rl.c
+index 9a0364601..908968c22 100644
+--- a/Kernel/platform/platform-pdp11dec/dev_rl.c
++++ b/Kernel/platform/platform-pdp11dec/dev_rl.c
+@@ -73,53 +73,57 @@ static void rl_wait(void)
+         ;
+ }
+ 
+-/* Current cylinder tracking (avoids unnecessary seeks) */
+-static uint16_t cur_cyl = 0xFFFF;  /* unknown */
++/* Where the heads are: cylinder and head (0xFFFF: unknown) */
++static uint16_t cur_cyl = 0xFFFF;
++static uint8_t cur_head;
+ 
+-/* Seek to the cylinder containing an RL02 linear sector */
++/*
++ * Position the heads for an RL02 linear sector.  The drive selects the
++ * head with the seek (RLDA bit 4), and Read/Write Data only find sectors
++ * whose header matches the cylinder AND head the drive is on (a real RL,
++ * and the QBone's RL11; SIMH does not check).  After the seek, wait for
++ * the drive itself (DRDY), not only the controller.
++ */
+ static void rl_seek(uint16_t linear)
+ {
+     uint16_t target_cyl = linear / 80;
++    uint8_t head = (linear / 40) & 1;
+     int16_t diff;
+     uint16_t da;
+ 
+-    if (target_cyl == cur_cyl)
++    if (target_cyl == cur_cyl && head == cur_head)
+         return;
+ 
+-    diff = target_cyl - cur_cyl;
+-
+-    /* Get Status to confirm drive is ready */
+-    rl_wait();
+-    RLDA = 0x04;   /* Get Status, reset errors */
+-    RLCS = RL_GETSTAT | RLCS_GO;
+     rl_wait();
+-
+     if (cur_cyl == 0xFFFF) {
+-        /* Unknown position — Read Header to find current cylinder */
++        /* Get Status with reset (marker, GS, reset: 013), then read a
++           header to learn the cylinder */
++        RLDA = 013;
++        RLCS = RL_GETSTAT | RLCS_GO;
++        rl_wait();
++        while (!(RLCS & RLCS_DRDY))
++            ;
+         RLCS = RL_RDHDR | RLCS_GO;
+         rl_wait();
+         cur_cyl = (RLMP >> 7) & 0x1FF;
+-        diff = target_cyl - cur_cyl;
+     }
+ 
+-    if (diff == 0) {
+-        cur_cyl = target_cyl;
+-        return;
+-    }
+-
+-    /* Build seek RLDA: {difference[15:7], 0, head_select[4], 0, direction[2], 0, 0} */
+-    if (diff > 0) {
+-        da = (diff << 7) | 0x04;   /* outward (away from cyl 0), bit 2=1 */
+-    } else {
+-        da = ((-diff) << 7);        /* inward (toward cyl 0), bit 2=0 */
+-    }
+-
+-    rl_wait();
+-    RLDA = da;
++    /* {difference[15:7], head select[4], direction[2], marker[0]} */
++    diff = target_cyl - cur_cyl;
++    if (diff >= 0)
++        da = (diff << 7) | 4;	/* toward the spindle, higher cylinders */
++    else
++        da = (-diff) << 7;
++    if (head)
++        da |= 020;
++    RLDA = da | 1;
+     RLCS = RL_SEEK | RLCS_GO;
+     rl_wait();
++    while (!(RLCS & RLCS_DRDY))
++        ;
+ 
+     cur_cyl = target_cyl;
++    cur_head = head;
+ }
+ 
+ /*
+@@ -213,6 +217,7 @@ static int rl_transfer(bool is_read, uint8_t minor, uint8_t rawflag)
+         if (RLCS & RLCS_ERR) {
+             kprintf("rl%d: err blk %d rlcs=%x\n",
+                     minor, udata.u_block, RLCS);
++            cur_cyl = 0xFFFF;
+             udata.u_error = EIO;
+             break;
+         }
+@@ -230,8 +235,9 @@ static int rl_transfer(bool is_read, uint8_t minor, uint8_t rawflag)
+ 
+         rl_wait();
+         if (RLCS & RLCS_ERR) {
+-            kprintf("rl%d: err blk %d rlcs=%o\n",
++            kprintf("rl%d: err blk %d rlcs=%x\n",
+                     minor, udata.u_block, RLCS);
++            cur_cyl = 0xFFFF;
+             udata.u_error = EIO;
+             break;
+         }
+-- 
+2.56.0
+

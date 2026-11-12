@@ -1,7 +1,7 @@
 From ffb900ad2ec37f8e22437e11899823f8981ba6e6 Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 17:48:11 -0600
-Subject: [PATCH 04/15] pdp11dec: DEQNA/DELQA /dev/eth and kernel sockets for
+Subject: [PATCH 04/16] pdp11dec: DEQNA/DELQA /dev/eth and kernel sockets for
  netd; libc: setjmp saves the return address
 
 ---

@@ -1,7 +1,7 @@
 From b3d1be9e12e2c28da8a2bb2a4809a710093dad7b Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 19:16:54 -0600
-Subject: [PATCH 07/15] netd: send written data at once (TCP, UDP, raw),
+Subject: [PATCH 07/16] netd: send written data at once (TCP, UDP, raw),
  adaptive idle; disk: /dev/proc, /dev/zero minors
 
 ---
