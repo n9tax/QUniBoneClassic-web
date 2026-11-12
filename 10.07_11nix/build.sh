@@ -1,8 +1,9 @@
 #!/bin/bash
-# build.sh - build fuzix.rl02.gz from source: Fuzix with the PDP-11 port of
-# PR #1205 (codeberg.org/EtchedPixels/FUZIX), plus the patches in patches/.
+# build.sh - build 11nix.rl02.gz from source: Fuzix with the PDP-11 port of
+# PR #1205 (codeberg.org/EtchedPixels/FUZIX), plus the patches in patches/
+# that make it 11nix.
 #
-#   ./build.sh                 work tree in ./work, result ./fuzix.rl02.gz
+#   ./build.sh                 work tree in ./work, result ./11nix.rl02.gz
 #
 # Needs git, a host C compiler, python3, and the patched pdp11-aout cross
 # compiler from ../10.06_net11/toolchain (build-toolchain.sh). Set
@@ -38,11 +39,11 @@ echo "== C library"
 make -C Library/libs -f Makefile.pdp11 >> "$WORK/library.log" 2>&1
 
 echo "== kernel"
-make -C Kernel TARGET=pdp11dec VERSION=0.5 SUBVERSION='""' > "$WORK/kernel.log" 2>&1
+make -C Kernel TARGET=pdp11dec VERSION=0.1 SUBVERSION='""' > "$WORK/kernel.log" 2>&1
 
 echo "== programs and disk image"
 (cd Kernel/platform/platform-pdp11dec && ./build_fuzix_disk.sh) > "$WORK/disk.log" 2>&1
 grep "^Kernel:" "$WORK/disk.log"
 
-gzip -9 -c Kernel/platform/platform-pdp11dec/fuzix_rl02.dsk > "$HERE/fuzix.rl02.gz"
-echo "Done: $HERE/fuzix.rl02.gz"
+gzip -9 -c Kernel/platform/platform-pdp11dec/fuzix_rl02.dsk > "$HERE/11nix.rl02.gz"
+echo "Done: $HERE/11nix.rl02.gz"

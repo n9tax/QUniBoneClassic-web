@@ -28,7 +28,7 @@ DEMO_BIN = os.environ.get("QBC_DEMO",
                           os.path.join(QUNIBONE_HOME, "10.03_app_demo", "4_deploy", "demo"))
 APPS_DIR = os.path.join(QUNIBONE_HOME, "10.03_app_demo", "5_applications")
 BOOT_DIR = os.path.join(QUNIBONE_HOME, "10.02_devices", "5_boot")
-SYSTEM_IMAGE_DIRS = [os.path.join(QUNIBONE_HOME, "10.07_fuzix")]
+SYSTEM_IMAGE_DIRS = [os.path.join(QUNIBONE_HOME, "10.07_11nix")]
 PLATFORM_ENV = os.path.join(QUNIBONE_HOME, "qunibone-platform.env")
 
 CONFIG_DIR = os.path.join(DATA_DIR, "configs")
@@ -771,7 +771,7 @@ MIN_IMAGE_SIZE = 32 * 1024
 
 def scan_images(settings):
     roots = [IMAGE_DIR] + _app_roots(detect_platform(settings))
-    # systems that come with the QUniBone software (10.07_fuzix ...)
+    # systems that come with the QUniBone software (10.07_11nix ...)
     roots += [d for d in SYSTEM_IMAGE_DIRS if os.path.isdir(d)]
     roots += [d for d in settings.get("image_dirs", []) if os.path.isdir(d)]
     found = {}

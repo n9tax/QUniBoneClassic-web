@@ -1,7 +1,7 @@
 From f95abf3642f79f5955111a3d15c11470ffbe4916 Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 19:43:00 -0600
-Subject: [PATCH 08/13] net: datagrams go into the free slot (tnext); resolver:
+Subject: [PATCH 08/15] net: datagrams go into the free slot (tnext); resolver:
  network byte order, no unaligned access
 
 ---

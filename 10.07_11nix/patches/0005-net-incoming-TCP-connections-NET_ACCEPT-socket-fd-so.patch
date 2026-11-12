@@ -1,7 +1,7 @@
 From b9ddd8a437c0b10bd960a4aa7bd3cfd3328840aa Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 18:32:15 -0600
-Subject: [PATCH 05/13] net: incoming TCP connections (NET_ACCEPT), socket
+Subject: [PATCH 05/15] net: incoming TCP connections (NET_ACCEPT), socket
  fd->socket mapping, bind sets the local address, graceful close; netd -d;
  telnetd and httpd; /etc/rc
 

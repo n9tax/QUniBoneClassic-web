@@ -1,0 +1,153 @@
+From 113026eb4a8031e9e102a703530b2fc03ca52d1f Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Wed, 11 Nov 2026 18:09:03 -0600
+Subject: [PATCH 14/15] 11nix: the name of this Fuzix for DEC PDP-11s (banner,
+ uname, telnetd, httpd, boot block); OS_SYSNAME/OS_BANNER per platform; qe0
+ prints the Ethernet address in bytes
+
+---
+ Applications/netd/httpd.c                             | 4 ++--
+ Applications/netd/telnetd.c                           | 2 +-
+ Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S    | 2 +-
+ Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh | 4 ++--
+ Kernel/platform/platform-pdp11dec/config.h            | 3 +++
+ Kernel/platform/platform-pdp11dec/dev_qe.c            | 2 +-
+ Kernel/start.c                                        | 5 ++++-
+ Kernel/tools/makeversion.c                            | 5 ++++-
+ 8 files changed, 18 insertions(+), 9 deletions(-)
+
+diff --git a/Applications/netd/httpd.c b/Applications/netd/httpd.c
+index 8e1eefec7..aed920d34 100644
+--- a/Applications/netd/httpd.c
++++ b/Applications/netd/httpd.c
+@@ -26,12 +26,12 @@ static void reply(int fd, const char *status, const char *type, long len)
+ 	int n;
+ 	if (len >= 0)
+ 		n = snprintf(buf, sizeof(buf),
+-			"HTTP/1.0 %s\r\nServer: Fuzix httpd (PDP-11)\r\n"
++			"HTTP/1.0 %s\r\nServer: 11nix httpd (PDP-11)\r\n"
+ 			"Content-Type: %s\r\nContent-Length: %ld\r\n"
+ 			"Connection: close\r\n\r\n", status, type, len);
+ 	else
+ 		n = snprintf(buf, sizeof(buf),
+-			"HTTP/1.0 %s\r\nServer: Fuzix httpd (PDP-11)\r\n"
++			"HTTP/1.0 %s\r\nServer: 11nix httpd (PDP-11)\r\n"
+ 			"Content-Type: %s\r\nConnection: close\r\n\r\n",
+ 			status, type);
+ 	write(fd, buf, n);
+diff --git a/Applications/netd/telnetd.c b/Applications/netd/telnetd.c
+index 29a68b6db..aa0acd00e 100644
+--- a/Applications/netd/telnetd.c
++++ b/Applications/netd/telnetd.c
+@@ -207,7 +207,7 @@ static void session(void)
+ 	char *envp[5];
+ 	char *argv[3];
+ 
+-	netputs("\r\nFuzix on a PDP-11\r\n\r\n");
++	netputs("\r\n11nix on a PDP-11\r\n\r\n");
+ 	pw = login();
+ 	if (pw == NULL)
+ 		exit(1);
+diff --git a/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S b/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
+index 9c76acb70..962b24c57 100644
+--- a/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
++++ b/Kernel/platform/platform-pdp11dec/boot_fuzix_gas.S
+@@ -111,7 +111,7 @@ puts:
+ 	br	puts
+ 1:	rts	pc
+ 
+-msg:	.asciz	"\r\nLoading Fuzix..."
++msg:	.asciz	"\r\nLoading 11nix..."
+ crlf:	.asciz	"\r\n"
+ errmsg:	.asciz	"\r\nRL11 error\r\n"
+ 	.even
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index 10c1ef285..5b0642d4a 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -1,6 +1,6 @@
+ #!/bin/bash
+ #
+-# Build Fuzix RL02 disk image for STENSAT PDP-11/20 FPGA
++# Build the 11nix (Fuzix) RL02 disk image for DEC PDP-11s
+ #
+ # Produces two images:
+ #   fuzix_rl02.dsk     — raw 256-byte sectors (SIMH compatible)
+@@ -259,7 +259,7 @@ cat > "$BUILDDIR/index.html" <<'WWWEOF'
+ <html><head><title>PDP-11</title></head>
+ <body>
+ <h1>Hello from a PDP-11</h1>
+-<p>This page comes from a DEC PDP-11/23 running Fuzix, a small Unix,
++<p>This page comes from a DEC PDP-11/23 running 11nix, a small Unix based on Fuzix,
+ on its DEQNA/DELQA Ethernet controller (emulated by a QBone).</p>
+ <p>Telnet to this machine to log in.</p>
+ </body></html>
+diff --git a/Kernel/platform/platform-pdp11dec/config.h b/Kernel/platform/platform-pdp11dec/config.h
+index 67a5ee9cb..dd7e1b93c 100644
+--- a/Kernel/platform/platform-pdp11dec/config.h
++++ b/Kernel/platform/platform-pdp11dec/config.h
+@@ -77,4 +77,7 @@
+ #define NBUFS    4        /* Number of block buffers */
+ #define NMOUNTS	 1	  /* Number of mounts at a time */
+ 
++/* 11nix: this Fuzix for DEC PDP-11s with the QBone */
++#define OS_SYSNAME "11nix"
++#define OS_BANNER "11nix version %s, based on FUZIX 0.5\n"
+ #define plt_copyright() kprintf("PDP-11 port (c) 2026 Stensat Group LLC; DEC MMU, DEQNA/DELQA and QBone port 2026\n")
+diff --git a/Kernel/platform/platform-pdp11dec/dev_qe.c b/Kernel/platform/platform-pdp11dec/dev_qe.c
+index 67e43a537..36dd63770 100644
+--- a/Kernel/platform/platform-pdp11dec/dev_qe.c
++++ b/Kernel/platform/platform-pdp11dec/dev_qe.c
+@@ -176,7 +176,7 @@ static int qe_start(void)
+ 	QE_CSR = CSR_IL | CSR_RE;
+ 	setup_frame();
+ 	qe_state = 1;
+-	kprintf("qe0: DEQNA/DELQA at 174440, %x:%x:%x:%x:%x:%x\n",
++	kprintf("qe0: DEQNA/DELQA at 174440, %2x:%2x:%2x:%2x:%2x:%2x\n",
+ 		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+ 	return 1;
+ }
+diff --git a/Kernel/start.c b/Kernel/start.c
+index 0c8112c7d..8a2e77506 100644
+--- a/Kernel/start.c
++++ b/Kernel/start.c
+@@ -351,9 +351,12 @@ void fuzix_main(void)
+ 	if (d_open(TTYDEV, 0) != 0)
+ 		panic(PANIC_NOTTY);
+ 
++#ifndef OS_BANNER
++#define OS_BANNER "FUZIX version %s\n"
++#endif
+ 	/* Sign on messages */
+ 	kprintf(
+-			"FUZIX version %s\n"
++			OS_BANNER
+ 			"Copyright (c) 1988-2002 by H.F.Bower, D.Braun, S.Nitschke, H.Peraza\n"
+ 			"Copyright (c) 1997-2001 by Arcady Schekochikhin, Adriano C. R. da Cunha\n"
+ 			"Copyright (c) 2013-2015 Will Sowerbutts <will@sowerbutts.com>\n"
+diff --git a/Kernel/tools/makeversion.c b/Kernel/tools/makeversion.c
+index 85c4a22ea..bc030b81d 100644
+--- a/Kernel/tools/makeversion.c
++++ b/Kernel/tools/makeversion.c
+@@ -7,6 +7,9 @@ void write_body(FILE *out, char *v, char *sv, char *p)
+ {
+ 	fprintf(out, "#include \"kernel.h\"\n\
+ #include \"version.h\"\n\
++#ifndef OS_SYSNAME\n\
++#define OS_SYSNAME \"Fuzix\"\n\
++#endif\n\
+ /* Format is version/sysname/release/system */\n\
+ /* pack version first so we can use uname_str as a printf target */\n\
+ struct sysinfoblk sysinfo = {\n\
+@@ -31,7 +34,7 @@ struct sysinfoblk sysinfo = {\n\
+ 	{0, 0, 0},\n\
+ 	{0, 0, 0, 0, 0, 0, 0, 0},\n\
+ 	/* Quoting to work around cc65 bug */\n\
+-	\"%s\\0\"\"Fuzix\\0\"\"%s\\0\"\"%s\"\n\
++	\"%s\\0\" OS_SYSNAME \"\\0\"\"%s\\0\"\"%s\"\n\
+ };\n\n",
+ 	v, sv, p);
+ }
+-- 
+2.56.0
+

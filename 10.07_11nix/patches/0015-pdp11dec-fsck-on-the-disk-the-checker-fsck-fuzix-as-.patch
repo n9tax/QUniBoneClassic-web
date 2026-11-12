@@ -1,0 +1,42 @@
+From a381d964e897a9c6ae179976687930ebe7e26c9d Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Wed, 11 Nov 2026 18:33:40 -0600
+Subject: [PATCH 15/15] pdp11dec: fsck on the disk (the checker, fsck-fuzix, as
+ /bin/fsck)
+
+---
+ Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh | 4 ++++
+ Kernel/platform/platform-pdp11dec/pdp11.S             | 2 +-
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index 5b0642d4a..e22c807b3 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -132,6 +132,10 @@ for prog in ssh cat echo pwd mkdir rmdir chmod hi \
+     make_fuz $prog
+     EXTRA_BINS="$EXTRA_BINS $prog"
+ done
++# fsck: the checker itself (fsck.c is only a front end that runs it)
++build_util fsck "$UTILDIR/fsck-fuzix.c"
++make_fuz fsck
++EXTRA_BINS="$EXTRA_BINS fsck"
+ 
+ # --- V7 Bourne shell: pipes, redirection, scripts ---
+ SHDIR="$FUZIXDIR/Applications/V7/cmd/sh"
+diff --git a/Kernel/platform/platform-pdp11dec/pdp11.S b/Kernel/platform/platform-pdp11dec/pdp11.S
+index cccd8527d..36e38486d 100644
+--- a/Kernel/platform/platform-pdp11dec/pdp11.S
++++ b/Kernel/platform/platform-pdp11dec/pdp11.S
+@@ -15,7 +15,7 @@ init_early:
+ _plt_monitor:
+ _plt_reboot:
+ 	bis $0340,*$0177776	/* IRQ off */
+-1:	halt			/* to the console ODT; 1000g... reboots */
++1:	halt			/* to the console ODT; 10000g reboots */
+ 	br 1b
+ 
+ 	.bss
+-- 
+2.56.0
+

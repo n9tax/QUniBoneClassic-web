@@ -1,7 +1,7 @@
 From 019f7a3b0ac8db8a4ca111e679cbabcf53ac8940 Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 19:00:04 -0600
-Subject: [PATCH 06/13] libc pdp11: failed syscalls return -1; usleep rounds
+Subject: [PATCH 06/15] libc pdp11: failed syscalls return -1; usleep rounds
  up; telnetd works (sh -i, partial writes, no inherited SIGCHLD ignore)
 
 ---

@@ -1,7 +1,7 @@
 From 17a7444048f0f69362f01159801cd1ebc8fd5aa5 Mon Sep 17 00:00:00 2001
 From: Joe <joe@n9tax.com>
 Date: Tue, 10 Nov 2026 23:00:47 -0600
-Subject: [PATCH 12/13] net: 32 bit socket ring offsets (sockets 4+ broke), no
+Subject: [PATCH 12/15] net: 32 bit socket ring offsets (sockets 4+ broke), no
  unhook of open sockets, links released once, uIP userrequest cleared; ping:
  unsigned checksum bytes; signals 16-31 exit with their own number; pdp11dec:
  one terminal, 14 processes; netd: SIGUSR1 dumps links

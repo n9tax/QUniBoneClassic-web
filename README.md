@@ -14,8 +14,8 @@ program. This fork adds an easier way to run it, and an Ethernet controller.
 | **Live devices**: switch controllers and drives on and off, spin RL drives up and down, change disk images, all while the PDP-11 runs | [`10.05_control`](10.05_control/README.md) | as above |
 | **DELQA Ethernet** (QBone): puts the PDP-11 on your LAN | [`10.02_devices/DELQA.md`](10.02_devices/DELQA.md) | new, tested on a PC against simulated PDP-11 memory; first hardware tests pending |
 | **net11**: a small TCP/IP system for the PDP-11 itself: DHCP, ping, DNS, NTP, a web server and telnet, booted from the panel | [`10.06_net11`](10.06_net11/README.md) | new, runs in a PDP-11/23 simulator with the QBone's DELQA logic; not yet on hardware |
-| **Fuzix**: a small Unix with TCP/IP for the PDP-11/23: V7 shell, about 90 programs, telnet and web server, on an emulated RL02 and the DELQA | [`10.07_fuzix`](10.07_fuzix/README.md) | new, runs in SIMH as an 11/23 with a DELQA; not yet on hardware |
-| **GCC fixes for the PDP-11**: five code generation bugs found while building net11 and Fuzix, with a patch and a test generator | [`10.06_net11`](10.06_net11/README.md#gcc-fixes-for-the-pdp-11) | patch for GCC 13.3 |
+| **11nix**: a small Unix with TCP/IP for the PDP-11/23, based on Fuzix: V7 shell, about 95 programs, telnet and web server, on an emulated RL02 and the DELQA | [`10.07_11nix`](10.07_11nix/README.md) | new, runs in SIMH as an 11/23 with a DELQA; not yet on hardware |
+| **GCC fixes for the PDP-11**: five code generation bugs found while building net11 and 11nix, with a patch and a test generator | [`10.06_net11`](10.06_net11/README.md#gcc-fixes-for-the-pdp-11) | patch for GCC 13.3 |
 
 The changes are on the branch [`control-panel`](https://github.com/n9tax/QUniBoneClassic-web/tree/control-panel).
 

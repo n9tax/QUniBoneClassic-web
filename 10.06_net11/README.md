@@ -94,8 +94,9 @@ cp net11.lda ../../10.02_devices/5_boot/
 
 ### GCC fixes for the PDP-11
 
-Testing net11, and later Fuzix, turned up five code generation bugs in GCC's
-PDP-11 back end (13.3 and 15.2 alike).
+Testing net11, and later 11nix ([`../10.07_11nix`](../10.07_11nix/README.md)),
+turned up five code generation bugs in GCC's PDP-11 back end (13.3 and 15.2
+alike).
 [`toolchain/gcc-13-pdp11-fixes.patch`](toolchain/gcc-13-pdp11-fixes.patch)
 fixes them:
 
@@ -116,7 +117,7 @@ fixes them:
    destination were compiled as `mov (r0),r0; mov 2(r0),r1`: the second word
    came through the overwritten pointer. `long f(long *p) { return *p; }`
    was wrong at every optimization level. The pointer's word is loaded last
-   now. (net11 contains no such load; Fuzix, with its 64 bit `time_t`, did.)
+   now. (net11 contains no such load; 11nix, with its 64 bit `time_t`, did.)
 
 `tools/gen_cctest.py` generates the test programs that found them: about
 17,000 checks of shifts, compares, multiply and divide for every integer type

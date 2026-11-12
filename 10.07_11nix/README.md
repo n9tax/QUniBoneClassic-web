@@ -1,21 +1,26 @@
-# Fuzix: a small Unix with TCP/IP for the PDP-11/23
+# 11nix: a small Unix with TCP/IP for the PDP-11/23
 
-[Fuzix](https://www.fuzix.org/) is a Unix-like operating system for small
-computers, by Alan Cox and others. This directory has a Fuzix for PDP-11s with
-DEC memory management (11/23, 11/23+, and alike) that runs on a QBone: it boots
-from an emulated RL02 and talks to the network through the QBone's emulated
-DELQA.
+11nix is a Unix-like operating system for PDP-11s with DEC memory management
+(11/23, 11/23+, and alike) that runs on a QBone: it boots from an emulated
+RL02 and talks to the network through the QBone's emulated DELQA.
+
+11nix is based on [Fuzix](https://www.fuzix.org/), the Unix-like system for
+small computers by Alan Cox and others, and on the PDP-11 port of Fuzix by
+Stensat Group. It has its own memory layout for DEC processors, a DELQA
+driver, a telnet and a web server, and many fixes to the network layer and
+the C library (see [below](#how-it-works-and-what-changed)).
 
 ```
-FUZIX version 0.5
+Loading 11nix...
+11nix version 0.1, based on FUZIX 0.5
 ...
 248KiB total RAM, 176KiB available to processes (14 processes max)
 Mounting root fs (root_dev=0, rw): OK
 Starting /init
-qe0: DEQNA/DELQA at 174440, 08:00:2b:7e:c9:08
+qe0: DEQNA/DELQA at 174440, 08:00:2B:7E:C9:08
 network: inet 192.168.1.80  netmask 255.255.255.0 ...
-# ls /bin | wc -l
-     101
+# uname -a
+11nix 0.1  pdp11dec
 # ping google.com
 45 bytes from google.com (142.251.215.142) req=0
 ```
@@ -23,8 +28,8 @@ network: inet 192.168.1.80  netmask 255.255.255.0 ...
 What it has:
 
 * a V7 Bourne shell, pipes, job control in the background, signals
-* about 100 programs: `ls cp mv rm cat grep sed sort tr wc head tail od dd
-  tar ed levee (vi) more ps kill free df du date cal factor ubasic ...`
+* about 95 programs: `ls cp mv rm cat grep sed sort tr wc head tail od dd
+  tar ed levee (vi) more ps kill free df du fsck date cal factor ubasic ...`
   and Colossal Cave (`/usr/games/advent`)
 * TCP/IP: `netd` (uIP) with kernel sockets, started at boot
 * a **telnet server**: log in from any computer on the LAN
@@ -40,19 +45,19 @@ What it has:
 ## Running it on a QBone
 
 1. Update the QBone software (`./qbweb-update.sh`, or UPDATE in the web
-   panel): this directory comes with `fuzix.rl02.gz`, ready built.
+   panel): this directory comes with `11nix.rl02.gz`, ready built.
 2. In the web panel, CONFIGURE, make a new configuration:
    * SYSTEM: address width **18** (also for an 11/23+)
-   * MEMORY: emulate memory (all of it: Fuzix uses 248 KB)
-   * SERIAL & CLOCK: **KW11 line clock** on, **60 Hz** (Fuzix counts 60 ticks
+   * MEMORY: emulate memory (all of it: 11nix uses 248 KB)
+   * SERIAL & CLOCK: **KW11 line clock** on, **60 Hz** (11nix counts 60 ticks
      a second; at 50 Hz its clock runs slow)
    * NETWORK: **DELQA** on
    * DISKS: RL11, drive 0, type RL02, image
-     `/root/10.07_fuzix/fuzix.rl02` (the first start unpacks it from
-     `fuzix.rl02.gz`; your changes stay in `fuzix.rl02` after that)
+     `/root/10.07_11nix/11nix.rl02` (the first start unpacks it from
+     `11nix.rl02.gz`; your changes stay in `11nix.rl02` after that)
    * BOOTSTRAP: automatic (the RL boot loader)
 3. START. At the ODT prompt `@` on the PDP-11 console, type `10000g`.
-4. Fuzix boots to a `#` prompt on the console: you are root.
+4. 11nix boots to a `#` prompt on the console: you are root.
 
 ### The network
 
@@ -75,30 +80,36 @@ From another computer on the LAN (not the BeagleBone itself):
   `passwd`)
 * `http://192.168.1.80/` in a browser: the files in `/www`
 
-On the PDP-11: `ping host`, `dig name`, `htget http://host/path file`,
-`ntpdate -s pool.ntp.org`, `telnet host port`.
+On the PDP-11: `ping host` (until ctrl-C), `dig name`,
+`htget http://host/path file`, `ntpdate -s pool.ntp.org`, `telnet host port`.
 
 ### Stopping
 
 Type `sync`, then halt the PDP-11 (HALT on the front panel, or in the web
 panel). A kernel panic halts the processor too: `10000g` boots again.
 
+If the machine stopped without `sync`, the next boot finds the file system
+dirty and mounts it read-only (`warning: mounting dirty file system`). Type
+`fsck /dev/hd0` and answer `y` to its questions (sockets that were open show
+up as inodes "not of correct type": zap them). When it has repaired the disk
+it halts the processor: `10000g` boots again, read-write.
+
 ## Running it in SIMH
 
 ```sh
-gunzip -k fuzix.rl02.gz
-pdp11 fuzix.ini                # telnet localhost 2323, http://localhost:8080/
+gunzip -k 11nix.rl02.gz
+pdp11 11nix.ini                # telnet localhost 2323, http://localhost:8080/
 ```
 
-[`fuzix.ini`](fuzix.ini) sets up an 11/23 with 256 KB, an RL02 and a DELQA
+[`11nix.ini`](11nix.ini) sets up an 11/23 with 256 KB, an RL02 and a DELQA
 on SIMH's NAT network. Inside, the address is 10.0.2.15, the defaults of
 `/etc/netrc` and `/etc/resolv.conf`.
 
 ## How it works, and what changed
 
-The port of PR #1205 ([codeberg.org/EtchedPixels/FUZIX](https://codeberg.org/EtchedPixels/FUZIX/pulls/1205),
-by Stensat Group) runs Fuzix on an FPGA PDP-11/40 with 128 KB. Its platform
-`pdp11dec` here is for DEC processors:
+The Fuzix port of PR #1205 ([codeberg.org/EtchedPixels/FUZIX](https://codeberg.org/EtchedPixels/FUZIX/pulls/1205),
+by Stensat Group) runs on an FPGA PDP-11/40 with 128 KB. 11nix is its
+platform `pdp11dec` (the name in the sources), for DEC processors:
 
 * a 48 KB kernel (pages 0-5), a movable 8 KB window (page 6) and the I/O page
 * the kernel reaches user memory with MFPI/MTPI
@@ -113,9 +124,9 @@ every socket file descriptor led to socket 0; sockets 4 and up used negative
 buffer offsets; a closed socket could free a live one or corrupt an unrelated
 file; datagrams went into the wrong buffer slot; `setjmp` did not save the
 return address; failed system calls did not return -1; and more (see the
-commit messages). It also needs the GCC fixes of
-[`../10.06_net11`](../10.06_net11/README.md#gcc-fixes-for-the-pdp-11), one of
-which (32 bit loads through a pointer) Fuzix ran into.
+commit messages). The telnet and web servers are new. It also needs the GCC
+fixes of [`../10.06_net11`](../10.06_net11/README.md#gcc-fixes-for-the-pdp-11),
+one of which (32 bit loads through a pointer) 11nix ran into.
 
 ## Building
 
@@ -123,8 +134,9 @@ which (32 bit loads through a pointer) Fuzix ran into.
 ./build.sh
 ```
 
-clones the PDP-11 port, applies [`patches/`](patches/), and builds the kernel,
-the programs and `fuzix.rl02.gz`. It needs the patched GCC from
+clones the Fuzix PDP-11 port, applies [`patches/`](patches/), and builds the
+kernel, the programs and `11nix.rl02.gz`. It needs the patched GCC from
 [`../10.06_net11/toolchain`](../10.06_net11/toolchain/build-toolchain.sh).
 
-Fuzix is GPL 2; see the Fuzix sources.
+11nix, like Fuzix, is GPL 2; see the Fuzix sources for the authors and the
+license.
