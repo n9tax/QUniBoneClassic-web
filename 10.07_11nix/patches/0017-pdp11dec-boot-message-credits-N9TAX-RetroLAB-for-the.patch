@@ -1,0 +1,23 @@
+From 37e16ea879c8b3fa1f21432a16751d549385fd1b Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Thu, 12 Nov 2026 19:33:33 -0600
+Subject: [PATCH] pdp11dec: boot message credits N9TAX RetroLAB for the DEC
+ MMU, DEQNA/DELQA and QBone port
+
+---
+ Kernel/platform/platform-pdp11dec/config.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Kernel/platform/platform-pdp11dec/config.h b/Kernel/platform/platform-pdp11dec/config.h
+index dd7e1b93c..e3c45bdda 100644
+--- a/Kernel/platform/platform-pdp11dec/config.h
++++ b/Kernel/platform/platform-pdp11dec/config.h
+@@ -80,4 +80,4 @@
+ /* 11nix: this Fuzix for DEC PDP-11s with the QBone */
+ #define OS_SYSNAME "11nix"
+ #define OS_BANNER "11nix version %s, based on FUZIX 0.5\n"
+-#define plt_copyright() kprintf("PDP-11 port (c) 2026 Stensat Group LLC; DEC MMU, DEQNA/DELQA and QBone port 2026\n")
++#define plt_copyright() kprintf("PDP-11 port (c) 2026 Stensat Group LLC; DEC MMU, DEQNA/DELQA and QBone port (c) 2026 N9TAX RetroLAB\n")
+-- 
+2.56.0
+

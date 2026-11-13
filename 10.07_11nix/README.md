@@ -4,16 +4,19 @@
 (11/23, 11/23+, and alike) that runs on a QBone: it boots from an emulated
 RL02 and talks to the network through the QBone's emulated DELQA.
 
-11nix is based on [Fuzix](https://www.fuzix.org/), the Unix-like system for
-small computers by Alan Cox and others, and on the PDP-11 port of Fuzix by
-Stensat Group. It has its own memory layout for DEC processors, a DELQA
-driver, a telnet and a web server, and many fixes to the network layer and
-the C library (see [below](#how-it-works-and-what-changed)).
+11nix is by **N9TAX RetroLAB** (2026). It is based on
+[Fuzix](https://www.fuzix.org/), the Unix-like system for small computers by
+Alan Cox and others, and on the PDP-11 port of Fuzix, (c) 2026 Stensat Group
+LLC, written for an FPGA PDP-11/40. N9TAX RetroLAB added the DEC MMU support,
+the DEQNA/DELQA driver and the QBone port, a telnet and a web server, and
+many fixes to the network layer and the C library (see
+[below](#how-it-works-and-what-changed)).
 
 ```
 Loading 11nix...
 11nix version 0.1, based on FUZIX 0.5
 ...
+PDP-11 port (c) 2026 Stensat Group LLC; DEC MMU, DEQNA/DELQA and QBone port (c) 2026 N9TAX RetroLAB
 248KiB total RAM, 176KiB available to processes (14 processes max)
 Mounting root fs (root_dev=0, rw): OK
 Starting /init
@@ -40,7 +43,8 @@ What it has:
   swapped to the RL02
 
 > **Status: new.** Tested in SIMH as an 11/23 with 256 KB and a DELQA, on a
-> real network. It has not run on a real PDP-11 yet.
+> real network, and boots on a real PDP-11/23 with a QBone. The network on
+> the real machine is still being tested.
 
 ## Running it on a QBone
 
@@ -113,8 +117,8 @@ on SIMH's NAT network. Inside, the address is 10.0.2.15, the defaults of
 ## How it works, and what changed
 
 The Fuzix port of PR #1205 ([codeberg.org/EtchedPixels/FUZIX](https://codeberg.org/EtchedPixels/FUZIX/pulls/1205),
-by Stensat Group) runs on an FPGA PDP-11/40 with 128 KB. 11nix is its
-platform `pdp11dec` (the name in the sources), for DEC processors:
+(c) 2026 Stensat Group LLC) runs on an FPGA PDP-11/40 with 128 KB. 11nix
+adds the platform `pdp11dec` (the name in the sources), for DEC processors:
 
 * a 48 KB kernel (pages 0-5), a movable 8 KB window (page 6) and the I/O page
 * the kernel reaches user memory with MFPI/MTPI
@@ -143,5 +147,6 @@ clones the Fuzix PDP-11 port, applies [`patches/`](patches/), and builds the
 kernel, the programs and `11nix.rl02.gz`. It needs the patched GCC from
 [`../10.06_net11/toolchain`](../10.06_net11/toolchain/build-toolchain.sh).
 
-11nix, like Fuzix, is GPL 2; see the Fuzix sources for the authors and the
-license.
+11nix: DEC MMU, DEQNA/DELQA and QBone port (c) 2026 N9TAX RetroLAB. PDP-11
+port (c) 2026 Stensat Group LLC. Fuzix (c) Alan Cox and others. 11nix, like
+Fuzix, is GPL 2; see the Fuzix sources for all the authors and the license.
