@@ -1034,7 +1034,25 @@ void qunibusadapter_c::worker_device_dma_chunk_complete_event()
 
     dma_request_c *dmareq = dynamic_cast<dma_request_c *>(prl->active);
 
-    assert(dmareq != NULL);
+    // A DMA event without an active request, or for a transfer the PRU has
+    // not finished (it sets the final state before it signals): a stale
+    // event, not this request's end. It used to abort the whole program
+    // (assert) or end the running request as failed; now it is reported
+    // and ignored, and the request waits for its own completion.
+    if (dmareq == NULL) {
+        WARNING("DMA complete event without an active DMA request (status %u, %s @ %s, %u words): ignored",
+                (unsigned) mailbox->dma.cur_status, qunibus->control2text(mailbox->dma.buscycle),
+                qunibus->addr2text(mailbox->dma.startaddr & ~QUNIBUS_IOPAGE_ADDR_BITMASK),
+                (unsigned) mailbox->dma.wordcount);
+        return;
+    }
+    if (!dmareq->is_cpu_access && (mailbox->dma.cur_status == DMA_STATE_ARBITRATING
+                                   || mailbox->dma.cur_status == DMA_STATE_RUNNING)) {
+        WARNING("DMA complete event while the DMA of %s is still in progress (status %u): ignored",
+                dmareq->device ? dmareq->device->name.value.c_str() : "none",
+                (unsigned) mailbox->dma.cur_status);
+        return;
+    }
     // fix PRU data struct: remove IOPAGE bit from mailbox struct, was set im mailbox_execute()
     mailbox->dma.startaddr &= ~QUNIBUS_IOPAGE_ADDR_BITMASK ;
     mailbox->dma.cur_addr &= ~QUNIBUS_IOPAGE_ADDR_BITMASK ;
@@ -1054,6 +1072,16 @@ void qunibusadapter_c::worker_device_dma_chunk_complete_event()
         // failure: abort remaining chunks
         dmareq->success = false;
         more_chunks = false;
+        if (!dmareq->is_cpu_access)
+            WARNING("DMA failed: %s %s @ %s, %u words, stopped @ %s after %u, status %u (%s)",
+                    dmareq->device ? dmareq->device->name.value.c_str() : "none",
+                    qunibus->control2text(dmareq->qunibus_control),
+                    qunibus->addr2text(dmareq->qunibus_start_addr), (unsigned) dmareq->wordcount,
+                    qunibus->addr2text(mailbox->dma.cur_addr),
+                    (unsigned) ((mailbox->dma.cur_addr - mailbox->dma.startaddr) / 2),
+                    (unsigned) mailbox->dma.cur_status,
+                    mailbox->dma.cur_status == DMA_STATE_TIMEOUTSTOP ? "bus timeout: no RPLY" :
+                    mailbox->dma.cur_status == DMA_STATE_INITSTOP ? "INIT" : "?");
     } else if (wordcount_transferred == dmareq->wordcount) {
         // last chunk completed
         dmareq->success = true;
