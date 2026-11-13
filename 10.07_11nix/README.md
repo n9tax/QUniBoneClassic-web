@@ -28,11 +28,14 @@ network: inet 192.168.1.80  netmask 255.255.255.0 ...
 45 bytes from google.com (142.251.215.142) req=0
 ```
 
+All the commands on four pages: [`11nix-reference.pdf`](11nix-reference.pdf)
+(built by [`doc/make_reference.py`](doc/make_reference.py)).
+
 What it has:
 
 * a V7 Bourne shell, pipes, job control in the background, signals
 * about 95 programs: `ls cp mv rm cat grep sed sort tr wc head tail od dd
-  tar ed levee (vi) more ps kill free df du fsck date cal factor ubasic ...`
+  tar ed vi (levee) more ps kill free df du fsck date cal factor ubasic ...`
   and Colossal Cave (`/usr/games/advent`)
 * TCP/IP: `netd` (uIP) with kernel sockets, started at boot
 * a **telnet server**: log in from any computer on the LAN
@@ -70,7 +73,7 @@ A newer `11nix.rl02.gz` from an update is only unpacked when there is no
 ### The network
 
 Set the machine's address for your LAN before you use the network, on the
-console (with `ed /etc/netrc`, or `levee /etc/netrc` on a VT100):
+console (with `ed /etc/netrc`, or `vi /etc/netrc` on a VT100: `vi` is levee):
 
 ```
 ipaddr  192.168.1.80
@@ -79,7 +82,7 @@ netmask 255.255.255.0
 ```
 
 and your DNS server in `/etc/resolv.conf` (`nameserver 192.168.1.1`). Then
-`sync`, and boot again (START, `10000g`). There is no DHCP. The Ethernet address is the DELQA's.
+`halt`, and boot again (START, `10000g`). There is no DHCP. The Ethernet address is the DELQA's.
 
 From another computer on the LAN (not the BeagleBone itself):
 
@@ -92,16 +95,19 @@ On the PDP-11: `ping host` (until ctrl-C), `dig name`,
 
 ### Stopping
 
-Type `sync`, then halt the PDP-11 (HALT on the front panel, or in the web
-panel). A kernel panic halts the processor too. To boot again, START the
-configuration again (that reloads the RL boot loader, which the 11nix kernel
-overwrites), then `10000g`.
+Type `halt` (or `reboot`: both stop the processor). They write everything
+to the disk and mark it clean. `sync` alone is not enough: the disk stays
+marked "in use". A kernel panic halts the processor too. To boot again, START
+the configuration again (that reloads the RL boot loader, which the 11nix
+kernel overwrites), then `10000g`.
 
-If the machine stopped without `sync`, the next boot finds the file system
-dirty and mounts it read-only (`warning: mounting dirty file system`). Type
-`fsck /dev/hd0` and answer `y` to its questions (sockets that were open show
-up as inodes "not of correct type": zap them). When it has repaired the disk
-it halts the processor: START again and `10000g` boots, read-write.
+If the machine stopped any other way (HALT switch, power, a crash), the next
+boot finds the file system dirty and mounts it read-only (`warning: mounting
+dirty file system`, and `WARNING: the disk is READ-ONLY`); the network does
+not start then either. Type `fsck /dev/hd0` and answer `y` to its questions
+(sockets that were open show up as inodes "not of correct type": zap them).
+When it has repaired the disk it halts the processor: START again and
+`10000g` boots, read-write.
 
 ## Running it in SIMH
 

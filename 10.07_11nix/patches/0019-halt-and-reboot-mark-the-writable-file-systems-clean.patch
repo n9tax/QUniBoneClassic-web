@@ -1,0 +1,52 @@
+From 1bd495d588fbfed506c9e08b2a4ad99e9c4b2e33 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Thu, 12 Nov 2026 20:06:54 -0600
+Subject: [PATCH] halt and reboot mark the writable file systems clean (netd's
+ open buffer file stopped remount ro, so every boot found the disk dirty and
+ mounted it read-only); /bin/halt
+
+---
+ .../platform/platform-pdp11dec/build_fuzix_disk.sh  |  1 +
+ Kernel/syscall_other.c                              | 13 ++++++++++++-
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index 2cfb75bde..78fd158ad 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -464,6 +464,7 @@ ln levee vi
+ $(for b in $EXTRA_BINS; do echo "bget $BUILDDIR/$b.fuz $b"; echo "chmod 755 $b"; done)
+ ln cp mv
+ ln cp ln
++ln reboot halt
+ cd /etc
+ bget $BUILDDIR/passwd passwd
+ chmod 644 passwd
+diff --git a/Kernel/syscall_other.c b/Kernel/syscall_other.c
+index ec655b1bc..90f0f3260 100644
+--- a/Kernel/syscall_other.c
++++ b/Kernel/syscall_other.c
+@@ -531,8 +531,19 @@ arg_t _uadmin(void)
+ {
+ 	if (esuper())
+ 		return -1;
+-	if (func != AD_NOSYNC)
++	if (func != AD_NOSYNC) {
++		/* Halt or reboot: nothing writes after this sync, so the
++		   writable file systems are consistent: mark them clean, or
++		   the next boot finds them dirty (a file open for writing,
++		   such as netd's buffer, stops a remount read-only). */
++		if (cmd == A_SHUTDOWN || cmd == A_REBOOT) {
++			struct mount *m;
++			for (m = fs_tab; m < fs_tab + NMOUNTS; m++)
++				if (m->m_dev != NO_DEVICE && !(m->m_flags & MS_RDONLY))
++					m->m_fs.s_fmod = FMOD_GO_CLEAN;
++		}
+ 		sync();
++	}
+ 	/* Wants moving into machine specific files */
+ 	if (cmd == A_SHUTDOWN || cmd == A_DUMP) {
+ 		kputs("Halted.\n");
+-- 
+2.56.0
+
