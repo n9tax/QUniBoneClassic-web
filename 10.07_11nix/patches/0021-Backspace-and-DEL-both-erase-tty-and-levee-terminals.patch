@@ -1,0 +1,202 @@
+From 69594a35883b1080a798c19dfd48a3bcfa4277b1 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Fri, 13 Nov 2026 07:06:20 -0600
+Subject: [PATCH] Backspace and DEL both erase (tty and levee: terminals send
+ one or the other); levee: arrow keys (ESC [ A..D, ESC O A..D) move like k j l
+ h, end an insert first, are ignored on the : line
+
+---
+ Applications/levee/globals.c  |  2 +-
+ Applications/levee/insert.c   |  4 +++
+ Applications/levee/misc.c     |  7 +++-
+ Applications/levee/unixcall.c | 68 +++++++++++++++++++++++++++++++++--
+ Kernel/tty.c                  |  6 +++-
+ 5 files changed, 81 insertions(+), 6 deletions(-)
+
+diff --git a/Applications/levee/globals.c b/Applications/levee/globals.c
+index 074f3352d..08ab1f507 100644
+--- a/Applications/levee/globals.c
++++ b/Applications/levee/globals.c
+@@ -415,5 +415,5 @@ cmdtype movemap[128]={
+     /*| */ TO_COL,
+     /*} */ PARA_FWD,
+     /*~ */ TWIDDLE_C,
+-    /*^?*/ BAD_COMMAND
++    /*^?*/ GO_LEFT		/* DEL: the backspace key of many terminals */
+     };
+diff --git a/Applications/levee/insert.c b/Applications/levee/insert.c
+index e9e681ed7..da51e8d7d 100644
+--- a/Applications/levee/insert.c
++++ b/Applications/levee/insert.c
+@@ -18,6 +18,8 @@
+  */
+ #include "levee.h"
+ #include "extern.h"
++
++extern int in_line;
+ #include <string.h>
+ 
+ int PROC
+@@ -78,6 +80,7 @@ insertion(int count, int openflag, int *dp, int *yp, bool visual)
+ 	moveright(&core[curr], &core[endd], rsize);
+ 
+     cp = curr;
++    in_line = 1;
+     do {				/* Insert loop */
+ 	Dflag = (cp==0 || core[cp-1]==EOL);
+ 	do {
+@@ -129,6 +132,7 @@ insertion(int count, int openflag, int *dp, int *yp, bool visual)
+ 	    mvcur(-1, currDLE);
+ 	}
+     } while (c != ESC && cp <= endd-INSSIZE);
++    in_line = 0;
+     *dp = cp;					/* start display here */
+ 
+     if (count > 1) {				/* repeated insertion */
+diff --git a/Applications/levee/misc.c b/Applications/levee/misc.c
+index ef7fe9627..62f13ddcf 100644
+--- a/Applications/levee/misc.c
++++ b/Applications/levee/misc.c
+@@ -19,13 +19,17 @@
+ #include "levee.h"
+ #include "extern.h"
+ 
++extern int in_line;
++
+ bool PROC
+ lvgetline(char *str)
+ {
+     int len;
+     char flag;
+ 
++    in_line = 2;
+     flag = line(str, 0, COLS-curpos.x, &len);
++    in_line = 0;
+     str[len] = 0;
+     strput(CE);
+     return (flag == EOL);
+@@ -359,7 +363,8 @@ line(char *s, int start, int endd, int *size)
+ 	    tabptr = 0;
+ 	    mvcur(-1,ixp=col0);
+ 	}
+-	else if (c==erasechar) {
++	else if (c==erasechar || ((c == 0x08 || c == 0x7f) &&
++		 (erasechar == 0x08 || erasechar == 0x7f))) {
+ 	    if (ip>start)
+ 		back_up(s[--ip]);
+ 	    else {
+diff --git a/Applications/levee/unixcall.c b/Applications/levee/unixcall.c
+index 677682532..478040439 100644
+--- a/Applications/levee/unixcall.c
++++ b/Applications/levee/unixcall.c
+@@ -60,7 +60,7 @@ char *basename(char *s)
+ 
+ 
+ static int ioset = 0;
+-static struct termios old;
++static struct termios old, raw;
+ 
+ void initcon(void)
+ {
+@@ -79,6 +79,7 @@ void initcon(void)
+ 	new.c_oflag = 0;
+ 
+ 	tcsetattr(0, TCSANOW, &new);	/* terminal setup for editor */
++	memcpy(&raw, &new, sizeof(raw));
+         ioset=1;
+     }
+ }
+@@ -91,10 +92,71 @@ void fixcon(void)
+     }
+ }
+ 
++/* Arrow keys: a terminal sends ESC [ A (or ESC O A) all at once; a lone
++   ESC is followed by nothing for a while.  The arrows move like k j l h;
++   in insert mode they end the insert first (ESC, then the move), on the
++   : and / line they are ignored. */
++int in_line;			/* 1 insert mode, 2 the : or / line */
++static int pending = -1;	/* a key read too early */
++
++static int key_timed(void)
++{
++    unsigned char c;
++    return read(0, &c, 1) == 1 ? c : -1;
++}
++
++/* after an ESC: h j k l for an arrow, 0 for another sequence, -1 for none */
++static int arrow(void)
++{
++    int c, k = -1;
++
++    raw.c_cc[VMIN] = 0;
++    raw.c_cc[VTIME] = 1;
++    tcsetattr(0, TCSANOW, &raw);
++    c = key_timed();
++    if (c == '[' || c == 'O') {
++	do
++	    c = key_timed();
++	while (c >= 0 && c < 0x40);	/* parameters, as in ESC [ 2 ~ */
++	switch (c) {
++	case 'A': k = 'k'; break;
++	case 'B': k = 'j'; break;
++	case 'C': k = 'l'; break;
++	case 'D': k = 'h'; break;
++	default:  k = 0;
++	}
++    }
++    else
++	pending = c;		/* a key typed right after ESC, or none */
++    raw.c_cc[VMIN] = old.c_cc[VMIN];
++    raw.c_cc[VTIME] = old.c_cc[VTIME];
++    tcsetattr(0, TCSANOW, &raw);
++    return k;
++}
++
+ int getKey(void)
+ {
+     unsigned char c;
++    int k;
+ 
+-    read(0,&c,1);
+-    return c;
++    if (pending >= 0) {
++	k = pending;
++	pending = -1;
++	return k;
++    }
++    for (;;) {
++	read(0,&c,1);
++	if (c != 033 || !ioset)
++	    return c;
++	k = arrow();
++	if (k < 0)
++	    return 033;		/* the ESC key itself */
++	if (k == 0 || in_line == 2)
++	    continue;		/* ignored */
++	if (in_line == 1) {
++	    pending = k;	/* end the insert, then move */
++	    return 033;
++	}
++	return k;
++    }
+ }
+diff --git a/Kernel/tty.c b/Kernel/tty.c
+index fb53b5968..4d3461a58 100644
+--- a/Kernel/tty.c
++++ b/Kernel/tty.c
+@@ -450,7 +450,11 @@ sigout:
+ 		        t->flag ^= TTYF_DISCARD;
+ 			return 1;
+ 		}
+-		if (c == t->termios.c_cc[VERASE]) {
++		/* Backspace and DEL both erase while the erase key is
++		   either of them: terminals send one or the other */
++		wr = t->termios.c_cc[VERASE];
++		if (c == wr || ((c == CTRL('H') || c == 0x7F) &&
++				(wr == CTRL('H') || wr == 0x7F))) {
+ 		        wr = ECHOE;
+ 		        goto eraseout;
+ 		} else if (c == t->termios.c_cc[VKILL]) {
+-- 
+2.56.0
+

@@ -157,10 +157,11 @@ story += section("Keys at the prompt")
 story += [commands([
     ("Ctrl-C", "Interrupt the running program."),
     ("Ctrl-D", "End of input (finishes " + c("cat > file") + ")."),
-    ("Ctrl-H", "Erase a character. Ctrl-U erases the whole line."),
+    ("Backspace", "Erase a character (Ctrl-H and DEL both work). Ctrl-U erases the whole "
+     "line."),
     ("Ctrl-S / Ctrl-Q", "Pause / resume output. Ctrl-O throws output away until pressed again."),
-    ("Backspace prints ^?", "Your terminal sends DEL: type " + c("stty erase '^?'") + ". To keep "
-     "it, put it in " + c("/.profile") + ": " + c("echo \"stty erase '^?'\" > /.profile")),
+    ("Arrow keys", "Not at the prompt: the shell has no line editing or history. An arrow "
+     "only moves the cursor on the screen and puts junk in the line: Ctrl-U, and type it again."),
 ])]
 
 story += section("The shell (V7 Bourne shell)")
@@ -224,7 +225,7 @@ story += [commands([
      + " sets it by hand."),
     ("mount", "Mounted disks. " + c("/dev/hd0") + " is the RL02."),
     ("fsck /dev/hd0", "Check and repair the disk (see Starting and stopping)."),
-    ("stty", "Terminal settings (" + c("stty erase '^?'") + ")."),
+    ("stty", "Terminal settings (" + c("stty -a") + " shows them)."),
     ("passwd", "Set root's password (none at first: anyone on the LAN can telnet in)."),
     ("su, id, who, whoami", "Change user; who you are; who is logged in."),
     ("which cmd", "Where a program is."),
@@ -275,9 +276,10 @@ story += [
     gap(3),
     commands([
         ("arrows  or  h j k l", "Move left, down, up, right. " + c("0") + " / " + c("$")
-         + " start / end of line, " + c("G") + " last line, " + c("1G") + " first."),
+         + " start / end of line, " + c("G") + " last line, " + c("1G") + " first. "
+         "While typing, an arrow ends the typing (like Esc) and then moves."),
         ("i  a  A  o", "Type before the cursor / after it / at the end of the line / on a new "
-         "line below. Then Esc."),
+         "line below. Backspace erases what you typed. Then Esc."),
         ("x", "Delete the character under the cursor."),
         ("dd", "Delete the line. " + c("3dd") + " deletes 3 lines."),
         ("cw", "Change a word: type the new one, then Esc."),
