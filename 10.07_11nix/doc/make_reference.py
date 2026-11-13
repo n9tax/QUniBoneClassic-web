@@ -8,6 +8,7 @@ Needs reportlab (pip install reportlab).
 import sys
 from xml.sax.saxutils import escape
 
+from reportlab import rl_config
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import letter
@@ -17,6 +18,11 @@ from reportlab.platypus import (BaseDocTemplate, Frame, KeepTogether, PageTempla
                                 Spacer, Table, TableStyle, CondPageBreak)
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "11nix-reference.pdf"
+
+# Plain Flate streams: ReportLab's default ASCII85+Flate pair is valid PDF,
+# but the CUPS pdftopdf filter (libcupsfilters 2.x) cannot decode it and
+# prints blank pages ("Unsupported compound stream filter").
+rl_config.useA85 = 0
 
 INK = colors.HexColor("#1d1d1f")
 MUTED = colors.HexColor("#5b5b60")
