@@ -1,0 +1,34 @@
+From eb9fb5db1681dc806a7b7e8c99d1c56ddc2e21a4 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Thu, 12 Nov 2026 20:56:17 -0600
+Subject: [PATCH] pdp11dec qe: restart the controller after a
+ nonexistent-memory DMA error (only a reset clears CSR NI; reception stopped
+ for good)
+
+---
+ Kernel/platform/platform-pdp11dec/dev_qe.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/Kernel/platform/platform-pdp11dec/dev_qe.c b/Kernel/platform/platform-pdp11dec/dev_qe.c
+index 36dd63770..1a37c888e 100644
+--- a/Kernel/platform/platform-pdp11dec/dev_qe.c
++++ b/Kernel/platform/platform-pdp11dec/dev_qe.c
+@@ -205,6 +205,15 @@ int eth_read(uint8_t minor, uint8_t rawflag, uint8_t flag)
+ 	used(rawflag);
+ 	used(flag);
+ 
++	/* A DMA the memory did not answer stops the controller; only a
++	   reset clears it: start it again */
++	if (QE_CSR & CSR_NI) {
++		kprintf("qe: nonexistent memory\n");
++		qe_state = 0;
++		if (!qe_start())
++			return 0;
++	}
++
+ 	while (rx_next < NRX) {
+ 		volatile struct desc *d = &rxd[rx_next];
+ 		uint16_t sw1 = d->sw1;
+-- 
+2.56.0
+
