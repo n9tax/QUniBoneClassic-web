@@ -454,12 +454,14 @@ def _generate_cmd(cfg, platform, cid):
     for key in ("dl11", "dl11b"):
         s = ser.get(key) or {}
         if s.get("enabled"):
+            # port and baud rate before "en": enabling opens the port and
+            # makes them read-only
             add("sd %s" % key)
-            add("en %s" % key)
             if s.get("port"):
                 add("p serialport %s" % _tok(s["port"], "Serial port"))
             if s.get("baud"):
                 add("p baudrate %d" % int(s["baud"]))
+            add("en %s" % key)
     if ser.get("kw11"):
         add("en kw11\t\t\t# KW11 line clock")
         try:
@@ -547,14 +549,16 @@ def _generate_cmd(cfg, platform, cid):
                 raise QbcError("%s has no drive unit %d" % (c["label"], unit))
             dev = "%s%d" % (c["drive_prefix"], unit)
             image = (d.get("image") or "").strip()
-            if not c.get("box"):
-                add("en %s" % dev)
+            # the drive type before "en": an enabled drive powers up, and
+            # then its type is read-only
             add("sd %s" % dev)
             if "type" in c["features"] and d.get("type"):
                 t = _tok(d["type"], "Drive type")
                 if t.upper() not in [x.upper() for x in c["drive_types"]]:
                     raise QbcError("%s: unknown drive type %s" % (dev, t))
                 add("p type %s" % t)
+            if not c.get("box"):
+                add("en %s" % dev)
             if "speed" in c["features"]:
                 add("p emulation_speed %d\t# spin up faster" % max(1, int(d.get("speed", 10) or 10)))
                 add("p runstopbutton 0\t\t# released: LOAD")
