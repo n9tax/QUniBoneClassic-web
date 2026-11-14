@@ -1,0 +1,27 @@
+From 24da1296738d97ac7e0fc0ee213ee3f3e3bdbe9b Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Sat, 14 Nov 2026 09:34:45 -0600
+Subject: [PATCH] levee: wait 0.2-0.3 s for the rest of an arrow key sequence
+ (VTIME 1 expired at the next tenth-second tick, often at once: arrows came in
+ as Esc [ A)
+
+---
+ Applications/levee/unixcall.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Applications/levee/unixcall.c b/Applications/levee/unixcall.c
+index 478040439..9fb06b88a 100644
+--- a/Applications/levee/unixcall.c
++++ b/Applications/levee/unixcall.c
+@@ -111,7 +111,7 @@ static int arrow(void)
+     int c, k = -1;
+ 
+     raw.c_cc[VMIN] = 0;
+-    raw.c_cc[VTIME] = 1;
++    raw.c_cc[VTIME] = 3;	/* 0.2-0.3 s: the kernel counts whole tenths */
+     tcsetattr(0, TCSANOW, &raw);
+     c = key_timed();
+     if (c == '[' || c == 'O') {
+-- 
+2.56.0
+
