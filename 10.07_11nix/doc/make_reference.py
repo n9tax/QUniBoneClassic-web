@@ -185,7 +185,7 @@ story += [commands([
 # --- Files -------------------------------------------------------------------
 story += section("Files and directories")
 story += [commands([
-    ("ls -l [dir]", "List files, long form (" + c("ls -a") + " shows hidden ones)."),
+    ("ls [dir]", "List files in columns. " + c("ls -l") + " long form, " + c("ls -a") + " hidden ones too, " + c("ls -1") + " one per line (always so into a pipe)."),
     ("cat file", "Show a file. " + c("more file") + " shows it a page at a time."),
     ("head / tail file", "First / last 10 lines (" + c("head -20 file") + ", " + c("tail -n 20 file") + ")."),
     ("cp a b, mv a b", "Copy / move or rename."),

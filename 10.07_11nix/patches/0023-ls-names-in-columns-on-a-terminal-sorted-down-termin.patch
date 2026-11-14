@@ -1,0 +1,175 @@
+From 48845a12c4ec93af2350027d64813c91b2faa215 Mon Sep 17 00:00:00 2001
+From: Joe <joe@n9tax.com>
+Date: Sat, 14 Nov 2026 12:04:53 -0600
+Subject: [PATCH] ls: names in columns on a terminal (sorted down, terminal
+ width or 80); -C forces columns, -1 one per line; a pipe or file still gets
+ one per line
+
+---
+ Applications/util/ls.c | 78 +++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 73 insertions(+), 5 deletions(-)
+
+diff --git a/Applications/util/ls.c b/Applications/util/ls.c
+index f3a20cea3..c6de95ebf 100644
+--- a/Applications/util/ls.c
++++ b/Applications/util/ls.c
+@@ -16,6 +16,8 @@
+ #include <unistd.h>
+ #include <time.h>
+ #include <sys/stat.h>
++#include <sys/ioctl.h>
++#include <termios.h>
+ 
+ #include <pwd.h>
+ #include <grp.h>
+@@ -46,12 +48,14 @@
+ #define LSF_OCT		0x080
+ #define LSF_DOWN	0x100
+ #define LSF_UNSORT	0x200
++#define LSF_COLS	0x400	/* names in columns (default on a terminal) */
+ 
+ typedef unsigned char BOOL;
+ 
+ static int flags;
+ static char prevtype;
+ static uint8_t bad; /* Set if any errors occur on the way */
++static int width = 80;	/* terminal width for column output */
+ 
+ static void lsfile(char *, struct stat *, int);
+ static void listfiles(char *name);
+@@ -238,6 +242,38 @@ static void lsfile(char *name, struct stat *statbuf, int flags)
+ 	fputc('\n', stdout);
+ }
+ 
++/*
++ * Print names in columns, sorted down each column like ls -C.
++ */
++static void printcols(char **names, int n)
++{
++	int i, r, c, len, maxlen = 0, cols, rows;
++
++	for (i = 0; i < n; i++) {
++		len = strlen(names[i]);
++		if (len > maxlen)
++			maxlen = len;
++	}
++	maxlen += 2;
++	cols = width / maxlen;
++	if (cols < 1)
++		cols = 1;
++	rows = (n + cols - 1) / cols;
++	for (r = 0; r < rows; r++) {
++		for (c = 0; c < cols; c++) {
++			i = r + c * rows;
++			if (i >= n)
++				break;
++			fputs(names[i], stdout);
++			/* pad unless it is the last one on the line */
++			if (i + rows < n)
++				for (len = strlen(names[i]); len < maxlen; len++)
++					fputc(' ', stdout);
++		}
++		fputc('\n', stdout);
++	}
++}
++
+ /*
+  * List the content of a directory or list a file.
+  */
+@@ -251,8 +287,8 @@ static void listfiles(char *name)
+ 	static DIR *dirp;
+ 	static char fullname[PATHLEN], *cp, **newlist;
+ 	static int listsize;
+-	char **list, *n;
+-	int i, listused;
++	char **list, **show = NULL, *n;
++	int i, listused, nshow = 0;
+ 
+ 	if (LSTAT(name, &statbuf) < 0) {
+ 		perror(name);
+@@ -320,6 +356,12 @@ static void listfiles(char *name)
+ 	/* Sort the files. */
+ 	if (!(flags & LSF_UNSORT))
+ 		qsort((char *) list, listused, sizeof(char *), flags & LSF_DOWN ? revnamesort : namesort);
++	/* In columns: collect the names first, then print them together */
++	if ((flags & LSF_COLS) && listused &&
++		(show = malloc(listused * sizeof(char *))) == NULL) {
++		fprintf(stderr, "No memory for ls buffer\n");
++		exit(2);
++	}
+ 	/* Now finally list the filenames. */
+ 	for (i = 0; i < listused; i++) {
+ 		n = list[i];
+@@ -336,12 +378,22 @@ static void listfiles(char *name)
+ 		/* Apply filters. */
+ 		if (!(flags & (LSF_DIR | LSF_FILE)) ||
+ 			((flags & LSF_DIR) && S_ISDIR(statbuf.st_mode)) ||
+-			((flags & LSF_FILE) && !S_ISDIR(statbuf.st_mode)))
+-			lsfile(cp, &statbuf, flags);
++			((flags & LSF_FILE) && !S_ISDIR(statbuf.st_mode))) {
++			if (!show)
++				lsfile(cp, &statbuf, flags);
++			else if ((show[nshow] = strdup(cp)) != NULL)
++				nshow++;
++		}
+ 		if (!(flags & LSF_RECUR) || !S_ISDIR(statbuf.st_mode) || !strcmp(cp, ".") || !strcmp(cp, ".."))
+ freename:
+ 			{ free(n); list[i] = NULL; }
+ 	}
++	if (show) {
++		printcols(show, nshow);
++		while (nshow)
++			free(show[--nshow]);
++		free(show);
++	}
+ 	/* Recursively list directories found. */
+ 	if (flags & LSF_RECUR) {
+ 		for (i = 0; i < listused; i++) {
+@@ -358,13 +410,15 @@ freename:
+ 
+ static void printusage(FILE *out)
+ {
+-	fprintf(out, "Usage: ls [-Radfiloru] [file...]\n");
++	fprintf(out, "Usage: ls [-1CRadfiloru] [file...]\n");
+ }
+ 
+ int main(int argc, char *argv[])
+ {
+ 	static char *def[1] = {"."};
+ 	char *cp;
++	struct winsize ws;
++	int cols = -1;	/* -1: decide by whether the output is a terminal */
+ 	flags = 0;
+ 	for (--argc, ++argv; argc > 0 && argv[0][0] == '-'; --argc, ++argv) {
+ 		for (cp = *argv + 1; *cp; ++cp) {
+@@ -399,6 +453,12 @@ int main(int argc, char *argv[])
+ 			case 'R': /* POSIX recursive directory listing */
+ 				flags |= LSF_RECUR;
+ 				break;
++			case 'C': /* POSIX names in columns */
++				cols = 1;
++				break;
++			case '1': /* POSIX one name per line */
++				cols = 0;
++				break;
+ 			default:
+ 				fprintf(stderr, "Unknown option -%c\n", *cp);
+ 				printusage(stderr);
+@@ -406,6 +466,14 @@ int main(int argc, char *argv[])
+ 			}
+ 		}
+ 	}
++	/* Columns by default on a terminal, one per line into a pipe or
++	   file (so scripts and wc still see one name per line) */
++	if (cols < 0)
++		cols = isatty(1);
++	if (cols && !(flags & (LSF_LONG | LSF_INODE)))
++		flags |= LSF_COLS;
++	if (ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_col >= 20)
++		width = ws.ws_col;
+ 	if (argc == 0) {
+ 		argc = 1;
+ 		argv = def;
+-- 
+2.56.0
+
