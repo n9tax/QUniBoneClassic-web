@@ -10,6 +10,7 @@ import errno
 import re
 import fcntl
 import os
+import resource
 import signal
 import subprocess
 import termios
@@ -33,6 +34,41 @@ def _make_ctty():
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     except (IOError, OSError):
         pass
+    # If demo crashes, let it leave a core file (in its working directory)
+    # for gdb: the session log alone does not say where it crashed.
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE,
+                           (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+    except (ValueError, OSError):
+        pass
+
+
+SESSION_LOGS_KEPT = 5   # last-session.log, last-session.1.log ... .4.log
+
+
+def _rotate_session_logs():
+    """Keep the logs of earlier sessions: a crash is often noticed only
+    after the next start, which used to overwrite the evidence."""
+    base, ext = os.path.splitext(core.SESSION_LOG)
+    names = [core.SESSION_LOG] + ["%s.%d%s" % (base, i, ext)
+                                  for i in range(1, SESSION_LOGS_KEPT)]
+    for i in range(len(names) - 1, 0, -1):
+        try:
+            os.replace(names[i - 1], names[i])
+        except OSError:
+            pass
+
+
+def _exit_text(code):
+    # Python 3.4 on the bone has no signal.Signals
+    names = {}
+    for n in sorted(dir(signal)):       # SIGABRT before its alias SIGIOT
+        if n.startswith("SIG") and not n.startswith("SIG_") \
+                and isinstance(getattr(signal, n), int):
+            names.setdefault(int(getattr(signal, n)), n)
+    if code is not None and code < 0 and -code in names:
+        return "%d (%s)" % (code, names[-code])
+    return "%s" % code
 
 
 class Runner(object):
@@ -178,6 +214,7 @@ class Runner(object):
             self.stopped_at = None
             self.exit_code = None
             try:
+                _rotate_session_logs()
                 self.session_log = open(core.SESSION_LOG, "wb")
             except (IOError, OSError):
                 self.session_log = None
@@ -211,8 +248,16 @@ class Runner(object):
             self.exit_code = code
             self.stopped_at = time.time()
             self.master = None
-        self.note("demo exited with code %s" % code)
-        self.log("demo exited, code %s" % code)
+        self.note("demo exited with code %s" % _exit_text(code))
+        cwd = (self.spec or {}).get("cwd") or "."
+        corefile = os.path.join(cwd, "core")
+        try:
+            dumped = code is not None and code < 0 and \
+                time.time() - os.path.getmtime(corefile) < 120
+        except OSError:
+            dumped = False
+        self.log("demo exited, code %s%s" % (_exit_text(code),
+                 (", core file " + corefile) if dumped else ""))
         if self.session_log:
             try:
                 self.session_log.close()
@@ -289,6 +334,7 @@ class Runner(object):
                 return self.status()
             self.state = "stopping"
             proc = self.proc
+        self.log("stop requested%s" % (" (force)" if force else ""))
         t = threading.Thread(target=self._stopper, args=(proc, force), name="demo-stopper")
         t.daemon = True
         t.start()
