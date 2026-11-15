@@ -1,0 +1,143 @@
+From 300834e7876663ec8027f63fa3dfb2be6ca43347 Mon Sep 17 00:00:00 2001
+From: Joe <joen9tax@gmail.com>
+Date: Sun, 15 Nov 2026 17:19:38 -0600
+Subject: [PATCH] sh: line editing and history on a terminal (V7 sh built as
+ fsh with readline): up/down recall the last 4 commands, left/right edit;
+ readline skips ESC [ n ~ and ESC O x keys instead of inserting them, and does
+ not store a command that repeats the previous one
+
+---
+ Applications/V7/cmd/sh/main.c                 |  5 +++-
+ .../platform-pdp11dec/build_fuzix_disk.sh     |  9 +++++-
+ Library/libs/Makefile.pdp11                   |  4 ++-
+ Library/libs/readline.c                       | 28 +++++++++++++------
+ 4 files changed, 34 insertions(+), 12 deletions(-)
+
+diff --git a/Applications/V7/cmd/sh/main.c b/Applications/V7/cmd/sh/main.c
+index df44367ad..16fcf45d6 100644
+--- a/Applications/V7/cmd/sh/main.c
++++ b/Applications/V7/cmd/sh/main.c
+@@ -32,7 +32,10 @@ char* tempfile;
+ static void exfile(BOOL);
+ 
+ #ifdef BUILD_FSH
+-static char history[1024];
++#ifndef FSH_HISTORY
++#define FSH_HISTORY 1024
++#endif
++static char history[FSH_HISTORY];
+ static char inbuf[256];
+ static unsigned int inleft;
+ static char *inptr;
+diff --git a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+index 78fd158ad..bf466c93f 100755
+--- a/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
++++ b/Kernel/platform/platform-pdp11dec/build_fuzix_disk.sh
+@@ -138,11 +138,18 @@ make_fuz fsck
+ EXTRA_BINS="$EXTRA_BINS fsck"
+ 
+ # --- V7 Bourne shell: pipes, redirection, scripts ---
++# Built as Fuzix's "fsh": on a terminal the command line is edited with
++# readline (arrow keys, the last 4 commands with up/down; RL_MAX_HIST=5 in
++# Library/libs/Makefile.pdp11).  Scripts and pipes (telnet) read as before.
+ SHDIR="$FUZIXDIR/Applications/V7/cmd/sh"
+-echo "Building sh (V7)..."
++echo "Building sh (V7, line editing and history)..."
++SAVED_CFLAGS="$CFLAGS"; SAVED_LDFLAGS="$LDFLAGS"
++CFLAGS="$CFLAGS -DBUILD_FSH -DFSH_HISTORY=512"
++LDFLAGS="-L$LIBDIR -lreadlinepdp11 $LDFLAGS"
+ build_util sh $(for f in args blok builtin cmd ctype error expand fault io \
+     macro main msg name print service setbrk stak string word xec glob; do
+     echo "$SHDIR/$f.c"; done)
++CFLAGS="$SAVED_CFLAGS"; LDFLAGS="$SAVED_LDFLAGS"
+ make_fuz sh
+ EXTRA_BINS="$EXTRA_BINS sh"
+ # Minimal ls (upstream ls.c is too large for 16KB)
+diff --git a/Library/libs/Makefile.pdp11 b/Library/libs/Makefile.pdp11
+index 5460c7819..e6a43f441 100644
+--- a/Library/libs/Makefile.pdp11
++++ b/Library/libs/Makefile.pdp11
+@@ -3,7 +3,9 @@ ASM = pdp11-aout-as
+ AR = pdp11-aout-ar
+ PLATFORM = pdp11
+ export PLATFORM
+-CC_OPT = -c -Os -I../include -I../include/pdp11
++# RL_MAX_HIST: history slots of the shell's line editor; one holds the line
++# being typed while browsing, so 5 gives the last 4 commands (11nix)
++CC_OPT = -c -Os -I../include -I../include/pdp11 -DRL_MAX_HIST=5
+ # for stuff that gives gcc nightmares
+ CC_NOOPT = $(CC_OPT)
+ ASM_OPT = -o
+diff --git a/Library/libs/readline.c b/Library/libs/readline.c
+index 52eb1b8b6..26fdca2c3 100644
+--- a/Library/libs/readline.c
++++ b/Library/libs/readline.c
+@@ -20,7 +20,11 @@
+ #define CTRL(x)	((x) & 31)
+ 
+ #define WITH_HISTORY
++#ifdef RL_MAX_HIST
++#define MAX_HIST	RL_MAX_HIST
++#else
+ #define MAX_HIST	8
++#endif
+ 
+ static char *rl_end;
+ static char *rl_bufend;
+@@ -87,12 +91,12 @@ static void history_droplast(void)
+     rl_hend -= hlen[histend];
+ }
+ 
++
+ static void history_replace(void)
+ {
+     history_droplast();
+     history_add();
+ }
+-    
+ 
+ void rl_hinit(char *buffer, size_t len)
+ {
+@@ -267,11 +271,16 @@ int rl_edit_timeout(int fd, int ofd, const char *prompt,
+                 insert(c);
+                 continue;
+             } else if (esc) {
+-                if (c == '[')
++                /* ESC [ or ESC O, then parameters (digits, ';'),
++                   then the final character */
++                if (c == '[' || c == 'O' || (c >= '0' && c <= '9') ||
++                    c == ';')
+                     continue;
+                 esc = 0;
+                 if (c >= 'A' && c <= 'N')
+                     c = CTRL("PNFB   A     E"[c - 'A']);
++                else
++                    continue;	/* e.g. the '~' of ESC [ 3 ~ */
+             }
+             else if (c == '\n')
+                 break;
+@@ -344,13 +353,14 @@ int rl_edit_timeout(int fd, int ofd, const char *prompt,
+     }
+ out:
+ #ifdef WITH_HISTORY
+-    if (rl_inhist) {
+-        if (rl_end != rl_base)
+-            history_replace();
+-        else
+-            history_droplast();
+-    }
+-    else if (rl_end != rl_base)
++    /* Drop the copy of the typed line kept while browsing, then keep the
++       line unless it is empty or repeats the previous command (a recalled
++       command run again would otherwise fill the history with copies) */
++    if (rl_inhist)
++        history_droplast();
++    if (rl_end != rl_base && (histend == 0 ||
++        hlen[histend - 1] != (size_t)(rl_end - rl_base) ||
++        memcmp(hptr[histend - 1], rl_base, rl_end - rl_base)))
+         history_add();
+ #endif
+     write(ofd, "\n", 1);
+-- 
+2.56.1
+

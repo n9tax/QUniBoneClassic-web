@@ -160,8 +160,10 @@ story += [commands([
     ("Backspace", "Erase a character (Ctrl-H and DEL both work). Ctrl-U erases the whole "
      "line."),
     ("Ctrl-S / Ctrl-Q", "Pause / resume output. Ctrl-O throws output away until pressed again."),
-    ("Arrow keys", "Not at the prompt: the shell has no line editing or history. An arrow "
-     "only moves the cursor on the screen and puts junk in the line: Ctrl-U, and type it again."),
+    ("Up / Down", "Bring back the last 4 commands, to run again or edit."),
+    ("Left / Right", "Move in the line to correct it; typing inserts at the cursor. "
+     "Ctrl-A / Ctrl-E: start / end of the line."),
+    ("Over telnet", "Your telnet program edits the line instead: no up/down history there."),
 ])]
 
 story += section("The shell (V7 Bourne shell)")
@@ -178,7 +180,7 @@ story += [commands([
      + " is " + c("/bin") + "."),
     ("sh file", "Run a shell script. " + c("if/then/else/fi") + ", " + c("for x in ...; do ...; done")
      + ", " + c("while") + " work as in any Bourne shell."),
-    ("cd dir, pwd", "Change / show the directory. There is no " + c("~") + ", history or tab completion."),
+    ("cd dir, pwd", "Change / show the directory. There is no " + c("~") + " or tab completion."),
     ("exit", "Leave the shell (logs out a telnet session)."),
 ])]
 
