@@ -6,6 +6,7 @@ the H9273 backplane and the console cable for the 10-pin serial headers.
 
 Needs reportlab.  Sources are listed on the last page.
 """
+import os
 import sys
 
 from reportlab import rl_config
@@ -16,7 +17,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.graphics.shapes import (Circle, Drawing, Line, PolyLine, Rect,
                                        String, Group)
-from reportlab.platypus import (KeepTogether, PageBreak, Paragraph,
+from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph,
                                 SimpleDocTemplate, Spacer, Table, TableStyle)
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "11-23plus-upgrade.pdf"
@@ -218,76 +219,88 @@ def fig_slotb():
     return d
 
 
-# --- Figure 3: where things are on the KDF11-B (after DEC Figure 2-1) -------
+# --- Figure 3: DEC Figure 2-1, scanned (kdf11ba-fig2-1.png) --------------
 SWBLUE = colors.HexColor("#2b4f9e")
+FIG21 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "kdf11ba-fig2-1.png")
 
 
-def fig_board():
-    W, H = 460, 270
+def fig_dec_board():
+    w = 7.0 * inch
+    return Image(FIG21, width=w, height=w * 1235 / 1680)
+
+
+# --- Figure 5: the jumper stakes that matter, close up ----------------------
+def fig_jumpers():
+    W, H = 470, 250
     d = Drawing(W, H)
-    bx, by, bw, bh = 30, 34, 400, 206          # board, component side
-    d.add(Rect(bx, by, bw, bh, fillColor=colors.HexColor("#e8f1e4"),
-               strokeColor=INK, strokeWidth=0.8))
-    # contact fingers along the bottom edge (two pairs, A/B and C/D)
-    for fx in (bx + 10, bx + 205):
-        d.add(Rect(fx, by - 14, 185, 14, fillColor=colors.HexColor("#d9b44a"),
-                   strokeColor=INK, strokeWidth=0.5))
-    s(d, bx + bw / 2, by - 26, "contact fingers: into the backplane",
-      8, GREY)
-    s(d, bx + bw / 2, by + bh + 20, "handle edge (faces you in the box)",
-      8, GREY)
+    JUMP = colors.HexColor("#1f77b4")
 
-    def box(x, y, w, h, label, sub="", fill=colors.white, size=7.5,
-            dash=None, color=INK):
-        d.add(Rect(x, y, w, h, fillColor=fill, strokeColor=color,
-                   strokeWidth=0.7, strokeDashArray=dash))
-        s(d, x + w / 2, y + h / 2 + (2 if sub else -3), label, size, color,
-          bold=True)
-        if sub:
-            s(d, x + w / 2, y + h / 2 - 8, sub, 6.5, GREY)
+    def stake(x, y, name, side="left"):
+        d.add(Circle(x, y, 2.6, fillColor=colors.white, strokeColor=INK,
+                     strokeWidth=0.8))
+        if side == "left":
+            s(d, x - 6, y - 2.5, name, 7, INK, "end")
+        elif side == "right":
+            s(d, x + 6, y - 2.5, name, 7, INK, "start")
+        else:
+            s(d, x, y + 7, name, 7, INK)
 
-    # serial headers on the handle edge
-    box(bx + 44, by + bh - 26, 40, 26, "J2", "SLU 2")
-    box(bx + 88, by + bh - 26, 44, 26, "J1", "console")
-    # boot ROM sockets at the outer (left) edge, low down
-    box(bx + 8, by + 64, 52, 30, "E127", "ROM hi")
-    box(bx + 8, by + 26, 52, 30, "E126", "ROM lo")
-    # the two switch packs
-    d.add(Rect(bx + 76, by + 70, 16, 62, fillColor=SWBLUE, strokeColor=None))
-    d.add(Rect(bx + 104, by + 70, 16, 62, fillColor=SWBLUE, strokeColor=None))
-    s(d, bx + 84, by + 58, "S2", 8, WARN, bold=True)
-    s(d, bx + 112, by + 58, "S1", 8, WARN, bold=True)
-    s(d, bx + 84, by + 49, "E114", 6.5, GREY)
-    s(d, bx + 112, by + 49, "E102", 6.5, GREY)
-    # chips
-    cx = bx + 175
-    box(cx, by + 170, 90, 22, "E78  CIS", fill=colors.white, dash=(2, 2),
-        color=GREY)
-    box(cx, by + 143, 90, 22, "E77  CIS", fill=colors.white, dash=(2, 2),
-        color=GREY)
-    box(cx, by + 116, 90, 22, "E76  FPU", "(option)")
-    box(cx, by + 89, 90, 22, "E75  CPU")
-    box(cx, by + 62, 90, 22, "E74  MMU")
-    # jumper stakes
-    for i in range(10):
-        d.add(Circle(bx + 288, by + 22 + i * 9, 1.6, fillColor=INK,
-                     strokeColor=None))
-    s(d, bx + 296, by + 58, "J10–J19", 7, INK, "start", True)
-    s(d, bx + 296, by + 49, "(J10 lowest)", 6.5, GREY, "start")
-    # diagnostic LEDs
-    for i in range(5):
-        d.add(Circle(bx + 300 + i * 12, by + bh - 18, 4,
-                     fillColor=colors.HexColor("#c0392b"), strokeColor=None))
-    s(d, bx + 324, by + bh - 34, "diagnostic LEDs", 6.5, GREY)
-    # callouts
-    s(d, bx + 2, by + bh / 2 + 34, "outer edge", 7, GREY, "start")
-    d.add(Line(bx + 84, by + 136, bx + 84, by + 150, strokeColor=WARN,
-               strokeWidth=0.6))
-    s(d, bx + 70, by + 154, "baud rates", 7.5, WARN, "start", True)
-    d.add(Line(bx + 120, by + 100, bx + 140, by + 100, strokeColor=WARN,
-               strokeWidth=0.6))
-    s(d, bx + 128, by + 120, "boot /", 7.5, WARN, "start", True)
-    s(d, bx + 128, by + 110, "diagnostic", 7.5, WARN, "start", True)
+    def jumper(x1, y1, x2, y2, color=JUMP):
+        d.add(Line(x1, y1, x2, y2, strokeColor=color, strokeWidth=5,
+                   strokeLineCap=1))
+
+    top = H - 52
+    sp = 12
+    # A: power-up mode, the J10-J19 column (J19 at the top)
+    s(d, 80, H - 12, "Power-up mode", 9, INK, bold=True)
+    s(d, 80, H - 23, "column J10–J19, middle of the board", 7, GREY)
+    order = ["J19", "J18", "J17", "J16", None, "J15", "J14", "J13", "J12",
+             "J11", None, "J10"]
+    for col, (x, title, pair, color) in enumerate((
+            (45, "factory", ("J19", "J18"), JUMP),
+            (125, "no ROMs", ("J18", "J17"), WARN))):
+        s(d, x, top + 12, title, 7.5, color, bold=True)
+        ys = {}
+        y = top
+        for n in order:
+            if n:
+                stake(x, y, n, "left" if col == 0 else "right")
+                ys[n] = y
+            y -= sp if n else sp * 0.6
+        jumper(x, ys[pair[0]], x, ys[pair[1]], color)
+    s(d, 45, 18, "mode 2: boot ROMs", 7, GREY)
+    s(d, 125, 18, "mode 1: ODT", 7, WARN, bold=True)
+
+    # B: character format of the console port, J36-J40 (J40 at the top)
+    s(d, 245, H - 12, "Console character format", 9, INK, bold=True)
+    s(d, 245, H - 23, "left edge, below J2 (J38 = ground)", 7, GREY)
+    ys = {}
+    for i, n in enumerate(["J40", "J39", "J38", "J37", "J36"]):
+        ys[n] = top - i * sp
+        stake(245, ys[n], n, "left")
+    jumper(245, ys["J38"], 245, ys["J37"])
+    for i, t in enumerate(["only J38–J37:", "8 bits, no parity,",
+                           "1 stop bit (8N1)", "J39, J36, J40 open"]):
+        s(d, 262, top - 12 - i * 10, t, 7, INK, "start")
+    s(d, 245, top - 5 * sp - 26, "(2nd port: J28–J32, J30 = ground,",
+      6.5, GREY)
+    s(d, 245, top - 5 * sp - 35, "factory J30–J29 only)", 6.5, GREY)
+
+    # C: baud clock, J41-J46 across the top-left corner
+    s(d, 400, H - 12, "Baud clock (internal)", 9, INK, bold=True)
+    s(d, 400, H - 23, "top-left corner, by J2", 7, GREY)
+    xs = {}
+    for i, n in enumerate(["J46", "J45", "J44", "J43", "J42", "J41"]):
+        xs[n] = 345 + i * 22
+        stake(xs[n], top - 10, n, "top")
+    jumper(xs["J46"], top - 10, xs["J45"], top - 10)
+    jumper(xs["J43"], top - 10, xs["J42"], top - 10)
+    for i, t in enumerate(["J43–J42 in: console uses the", "on-board clock "
+                           "(S2 1–4 work)", "J46–J45 in: same for the 2nd port",
+                           "J41, J44 open (external clock)"]):
+        s(d, 345 - 4, top - 34 - i * 10, t, 7, INK, "start")
+    s(d, 400, 18, "blue = factory jumper   red = change", 7, GREY)
     return d
 
 
@@ -461,10 +474,10 @@ story += steps([
     "Modify the backplane (pages 2–3) and check it with a meter, all "
     "cards out.",
     "Set up the 11/23+ board and switch off the QBone devices it replaces "
-    "(pages 4–6). <b>This step is required:</b> the 11/23+ has its own console "
+    "(pages 4–8). <b>This step is required:</b> the 11/23+ has its own console "
     "port, second serial port and clock register at the same addresses as "
     "the QBone's DL11, 2nd DL11 and KW11.",
-    "Make the console cable (pages 7–8) and power up into ODT.",
+    "Make the console cable (pages 9–10) and power up into ODT.",
 ])
 story += [p("Your current 11/23 CPU board (KDF11-A) can only go back into "
             "the modified backplane if it is etch revision C or later. "
@@ -619,19 +632,48 @@ story += [table([
     ["Internal baud clock J43–J42, J45–J46", "internal",
      "keep"],
 ], [2.15 * inch, 1.9 * inch, 2.65 * inch])]
-story += [Spacer(1, 6), KeepTogether([fig_board(), p(
-    "Figure 3. The KDF11-B from the component side, handle edge up "
-    "(simplified from DEC Figure 2-1). The two unlabelled DIP switch packs "
-    "sit side by side: <b>S2, baud rates</b>, nearer the outer edge and the "
-    "ROM sockets; <b>S1, boot/diagnostic</b>, nearer the CPU chips.",
-    CAP)])]
-story += [PageBreak(), p("The two switch packs", H3),
+story += [PageBreak(), p("Where the jumpers and switches are", H3),
+          p("The board has no silkscreen, so go by DEC's drawing. It shows "
+            "the component side with the handle edge (J1, J2) at the top "
+            "and the contact fingers at the bottom. Every jumper stake is "
+            "drawn where it is on the board, as a small circle with its "
+            "number; a bracket joining two stakes is a jumper installed at "
+            "the factory. The stakes are in short columns, so count from a "
+            "landmark: the J10–J19 column sits just below the CPU chips, "
+            "J10 at the bottom; J36–J40 are at the left edge below J2; "
+            "J41–J46 run along the top-left corner."),
+          KeepTogether([fig_dec_board(), p(
+    "Figure 3. DEC Figure 2-1, KDF11-BA jumper, switch and diagnostic "
+    "display locations (KDF11-BA CPU Module User's Guide). <b>S2, baud "
+    "rates</b> (E114) is the switch pack nearer the outer edge and the ROM "
+    "sockets; <b>S1, boot/diagnostic</b> (E102) is nearer the CPU chips. "
+    "Brackets are the factory jumpers.", CAP)])]
+story += [PageBreak(), p("The jumpers that matter for the console", H3),
+          KeepTogether([fig_jumpers(), p(
+    "Figure 4. Close-ups of three stake groups of Figure 3, in their real "
+    "order. On a board without boot ROMs, move the power-up jumper from "
+    "J19–J18 to J18–J17 (mode 1), so the board starts in ODT and prints "
+    "@. If a previous owner changed the other two groups, set them back as "
+    "shown: wrong format jumpers give garbled characters, and with an "
+    "external clock selected the S2 switches do nothing. DEC Tables 2-4, "
+    "2-11, 2-12, 2-17, 2-19.", CAP)])]
+story += [p("The two switch packs", H3),
           KeepTogether([fig_switches(), p(
-    "Figure 4. Both packs as they sit on the board, at the factory "
+    "Figure 5. Both packs as they sit on the board, at the factory "
     "settings: switch 1 at the handle end, ON toward the CPU chips (DEC's "
     "drawing; if your switches have ON printed on them, trust that). S2: "
     "9600 baud on both ports (DEC Tables 2-10, 2-14, 2-21). S1: DEC "
     "Table 2-20.", CAP)])]
+story += [Spacer(1, 6), KeepTogether([table([
+    ["S2 1–4 (console) or 5–8 (2nd port)", "Baud rate"],
+    ["1 ON, 2 OFF, 3 OFF, 4 OFF  (5 ON, 6–8 OFF)", "<b>9600</b>"],
+    ["all four OFF", "19200"],
+    ["1 OFF, 2 ON, 3 OFF, 4 OFF", "7200"],
+    ["1 ON, 2 ON, 3 OFF, 4 OFF", "4800"],
+    ["1 ON, 2 OFF, 3 ON, 4 OFF", "2400  (more in DEC Table 2-10)"],
+    ["1 OFF, 2 OFF, 3 OFF, 4 ON", "1200"],
+    ["1 OFF, 2–4 ON  (9600 set the wrong way round)", "75"],
+], [4.2 * inch, 2.5 * inch])])]
 story += [table([
     ["S1 switch", "Factory", "Function (read by the boot ROMs only)"],
     ["1", "ON", "Run the CPU diagnostic at power-up"],
@@ -661,8 +703,7 @@ story += bullets([
     "point, such as advent, will run.",
     "<b>Where things are:</b> J1 (console, “J1 CONSOLE SLU 1”) "
     "and J2 (“SLU 2”) are side by side on the handle edge, J2 "
-    "nearer the corner. The jumper stakes J10–J19 are in a column near "
-    "the middle of the board (Figure 3).",
+    "nearer the corner (Figure 3).",
     "<b>Addresses:</b> console 777560 (vectors 60/64), 2nd SLU 776500 "
     "(300/304), clock register 777546 (vector 100), boot ROMs 173000.",
 ])
@@ -675,9 +716,9 @@ story += [PageBreak(), p("4. The console cable", H2),
             "serial port. It includes the null-modem crossing, so no "
             "adapter is needed."),
           KeepTogether([fig_header(),
-          p("Figure 5. The header pins and what each one carries.", CAP)]),
+          p("Figure 6. The header pins and what each one carries.", CAP)]),
           KeepTogether([fig_cable(),
-          p("Figure 6. Wiring. This is the “DCE DE-9S” column of "
+          p("Figure 7. Wiring. This is the “DCE DE-9S” column of "
             "the standard DEC pinout.", CAP)])]
 story += [table([
     ["Header pin", "Signal", "DE-9 female (PC)", "Note"],
@@ -710,13 +751,21 @@ story += steps([
     "receiver status. A lone <font face='Courier'>@</font> or the "
     "<font face='Courier'>START?</font> prompt means the cable works.",
     "Nothing at all: swap header pins 3 and 8 at the DE-9 (pins 2 and 3), "
-    "then check pin 7 is joined to 9. Garbage: check S2 switches 1–4.",
+    "then check pin 7 is joined to 9.",
+    "<b>One garbled character at power-up, then nothing:</b> that is the "
+    "line switching on, not a baud problem. The board is in mode 2 with no "
+    "boot ROMs and never reaches ODT. Flip HALT down: if ODT then prints "
+    "a number and @ cleanly, the speed is right; set mode 1 (Figure 4).",
+    "<b>Several garbled characters:</b> the speed or format is wrong. Try "
+    "picocom at 300, 1200, 2400 and 19200; check S2 1–4 against the table "
+    "above (ON as printed on the switch), J43–J42 (internal clock) and "
+    "J38–J37 (8N1).",
 ])
 
 story += [Spacer(1, 10), p("Sources", H3)]
 story += bullets([
     "DEC, <i>KDF11-BA CPU Module User's Guide</i> (EK-KDFEB-UG-001): "
-    "Tables 2-4, 2-6, 2-10, 2-13, 2-14, 2-17, 2-18, 2-19, 2-22; Figures "
+    "Tables 2-4, 2-6, 2-10 to 2-14, 2-17 to 2-22; Figures "
     "2-1, 2-3; Appendix D. bitsavers.org/pdf/dec/pdp11/1123/"
     "KDF11BA_UsersManual.pdf",
     "DEC, <i>BA11-N Mounting Box User's Guide</i> (EK-BA11N-UG-001): "
