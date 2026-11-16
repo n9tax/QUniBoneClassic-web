@@ -218,36 +218,116 @@ def fig_slotb():
     return d
 
 
-# --- Figure 3: E114 baud rate switches -------------------------------------
-def fig_switches():
-    W, H = 330, 120
+# --- Figure 3: where things are on the KDF11-B (after DEC Figure 2-1) -------
+SWBLUE = colors.HexColor("#2b4f9e")
+
+
+def fig_board():
+    W, H = 460, 270
     d = Drawing(W, H)
-    x0, y0 = 40, 30
-    sw = 26
-    d.add(Rect(x0 - 8, y0 - 8, 8 * sw + 16, 70, fillColor=colors.HexColor(
-        "#2b4f9e"), strokeColor=None))
-    on = {1: True, 5: True}
-    for i in range(8):
-        x = x0 + i * sw
-        d.add(Rect(x + 4, y0, sw - 8, 54, fillColor=colors.white,
-                   strokeColor=None))
-        up = on.get(i + 1, False)
-        ky = y0 + 30 if up else y0 + 4
-        d.add(Rect(x + 6, ky, sw - 12, 20, fillColor=INK, strokeColor=None))
-        s(d, x + sw / 2, y0 - 20, str(i + 1), 9, INK, bold=True)
-    s(d, x0 - 12, y0 + 40, "ON", 8, INK, "end", True)
-    s(d, x0 - 12, y0 + 8, "OFF", 8, INK, "end", True)
-    s(d, x0 + 2 * sw, H - 8, "console (J1): 9600", 8, INK, bold=True)
-    s(d, x0 + 6 * sw, H - 8, "2nd SLU (J2): 9600", 8, INK, bold=True)
-    d.add(Line(x0, H - 14, x0 + 4 * sw - 4, H - 14, strokeColor=INK,
+    bx, by, bw, bh = 30, 34, 400, 206          # board, component side
+    d.add(Rect(bx, by, bw, bh, fillColor=colors.HexColor("#e8f1e4"),
+               strokeColor=INK, strokeWidth=0.8))
+    # contact fingers along the bottom edge (two pairs, A/B and C/D)
+    for fx in (bx + 10, bx + 205):
+        d.add(Rect(fx, by - 14, 185, 14, fillColor=colors.HexColor("#d9b44a"),
+                   strokeColor=INK, strokeWidth=0.5))
+    s(d, bx + bw / 2, by - 26, "contact fingers: into the backplane",
+      8, GREY)
+    s(d, bx + bw / 2, by + bh + 20, "handle edge (faces you in the box)",
+      8, GREY)
+
+    def box(x, y, w, h, label, sub="", fill=colors.white, size=7.5,
+            dash=None, color=INK):
+        d.add(Rect(x, y, w, h, fillColor=fill, strokeColor=color,
+                   strokeWidth=0.7, strokeDashArray=dash))
+        s(d, x + w / 2, y + h / 2 + (2 if sub else -3), label, size, color,
+          bold=True)
+        if sub:
+            s(d, x + w / 2, y + h / 2 - 8, sub, 6.5, GREY)
+
+    # serial headers on the handle edge
+    box(bx + 44, by + bh - 26, 40, 26, "J2", "SLU 2")
+    box(bx + 88, by + bh - 26, 44, 26, "J1", "console")
+    # boot ROM sockets at the outer (left) edge, low down
+    box(bx + 8, by + 64, 52, 30, "E127", "ROM hi")
+    box(bx + 8, by + 26, 52, 30, "E126", "ROM lo")
+    # the two switch packs
+    d.add(Rect(bx + 76, by + 70, 16, 62, fillColor=SWBLUE, strokeColor=None))
+    d.add(Rect(bx + 104, by + 70, 16, 62, fillColor=SWBLUE, strokeColor=None))
+    s(d, bx + 84, by + 58, "S2", 8, WARN, bold=True)
+    s(d, bx + 112, by + 58, "S1", 8, WARN, bold=True)
+    s(d, bx + 84, by + 49, "E114", 6.5, GREY)
+    s(d, bx + 112, by + 49, "E102", 6.5, GREY)
+    # chips
+    cx = bx + 175
+    box(cx, by + 170, 90, 22, "E78  CIS", fill=colors.white, dash=(2, 2),
+        color=GREY)
+    box(cx, by + 143, 90, 22, "E77  CIS", fill=colors.white, dash=(2, 2),
+        color=GREY)
+    box(cx, by + 116, 90, 22, "E76  FPU", "(option)")
+    box(cx, by + 89, 90, 22, "E75  CPU")
+    box(cx, by + 62, 90, 22, "E74  MMU")
+    # jumper stakes
+    for i in range(10):
+        d.add(Circle(bx + 288, by + 22 + i * 9, 1.6, fillColor=INK,
+                     strokeColor=None))
+    s(d, bx + 296, by + 58, "J10–J19", 7, INK, "start", True)
+    s(d, bx + 296, by + 49, "(J10 lowest)", 6.5, GREY, "start")
+    # diagnostic LEDs
+    for i in range(5):
+        d.add(Circle(bx + 300 + i * 12, by + bh - 18, 4,
+                     fillColor=colors.HexColor("#c0392b"), strokeColor=None))
+    s(d, bx + 324, by + bh - 34, "diagnostic LEDs", 6.5, GREY)
+    # callouts
+    s(d, bx + 2, by + bh / 2 + 34, "outer edge", 7, GREY, "start")
+    d.add(Line(bx + 84, by + 136, bx + 84, by + 150, strokeColor=WARN,
                strokeWidth=0.6))
-    d.add(Line(x0 + 4 * sw + 4, H - 14, x0 + 8 * sw, H - 14,
-               strokeColor=INK, strokeWidth=0.6))
-    s(d, x0 + 8 * sw + 16, y0 + 20, "S2 (E114)", 8, GREY, "start")
+    s(d, bx + 70, by + 154, "baud rates", 7.5, WARN, "start", True)
+    d.add(Line(bx + 120, by + 100, bx + 140, by + 100, strokeColor=WARN,
+               strokeWidth=0.6))
+    s(d, bx + 128, by + 120, "boot /", 7.5, WARN, "start", True)
+    s(d, bx + 128, by + 110, "diagnostic", 7.5, WARN, "start", True)
     return d
 
 
-# --- Figure 4: the 10-pin header, face on -----------------------------------
+# --- Figure 4: the two switch packs, factory settings ---------------------
+S1_FUNC = {1: "CPU test", 2: "memory test", 3: "DECnet boot", 4: "console dialogue",
+           5: "–", 6: "–", 7: "RL01/RL02 boot", 8: "–"}
+
+
+def fig_switches():
+    W, H = 460, 200
+    d = Drawing(W, H)
+    rh = 17                          # one switch
+    top = H - 34                     # switch 1 at the top (handle edge)
+
+    def pack(x0, label, on, notes):
+        d.add(Rect(x0 - 6, top - 8 * rh - 4, 52, 8 * rh + 10,
+                   fillColor=SWBLUE, strokeColor=None))
+        for i in range(8):
+            y = top - (i + 1) * rh
+            d.add(Rect(x0, y + 2, 40, rh - 4, fillColor=colors.white,
+                       strokeColor=None))
+            kx = x0 + 22 if (i + 1) in on else x0 + 2
+            d.add(Rect(kx, y + 4, 16, rh - 8, fillColor=INK,
+                       strokeColor=None))
+            s(d, x0 - 12, y + 5, str(i + 1), 8, INK, bold=True)
+            if notes.get(i + 1):
+                s(d, x0 + 56, y + 5, notes[i + 1], 7.5, INK, "start")
+        s(d, x0 + 4, top + 6, "OFF", 7, INK, bold=True)
+        s(d, x0 + 34, top + 6, "ON", 7, INK, bold=True)
+        s(d, x0 + 20, top + 20, label, 8.5, WARN, bold=True)
+        s(d, x0 + 20, top - 8 * rh - 18, "toward the CPU chips: ON  →",
+          6.5, GREY)
+
+    pack(40, "S2 (E114) baud", {1, 5},
+         {1: "console J1:", 2: "9600", 5: "2nd SLU J2:", 6: "9600"})
+    pack(260, "S1 (E102) boot/diag", {1, 2, 4, 7}, S1_FUNC)
+    return d
+
+
+# --- Figure 5: the 10-pin header, face on -----------------------------------
 HDR = {1: ("Clock in", GREY, "leave open"),
        2: ("GND", INK, "to DE-9 pin 5"),
        3: ("Transmit +", C21, "to DE-9 pin 2"),
@@ -300,7 +380,7 @@ def fig_header():
     return d
 
 
-# --- Figure 5: the cable ----------------------------------------------------
+# --- Figure 6: the cable ----------------------------------------------------
 def fig_cable():
     W, H = 470, 250
     d = Drawing(W, H)
@@ -381,10 +461,10 @@ story += steps([
     "Modify the backplane (pages 2–3) and check it with a meter, all "
     "cards out.",
     "Set up the 11/23+ board and switch off the QBone devices it replaces "
-    "(pages 4–5). <b>This step is required:</b> the 11/23+ has its own console "
+    "(pages 4–6). <b>This step is required:</b> the 11/23+ has its own console "
     "port, second serial port and clock register at the same addresses as "
     "the QBone's DL11, 2nd DL11 and KW11.",
-    "Make the console cable (pages 6–7) and power up into ODT.",
+    "Make the console cable (pages 7–8) and power up into ODT.",
 ])
 story += [p("Your current 11/23 CPU board (KDF11-A) can only go back into "
             "the modified backplane if it is etch revision C or later. "
@@ -491,18 +571,21 @@ story += [table([
     ["DL11 2nd SLU (TU58)", "776500", "2nd port J2",
      "<b>Off</b>, or keep it and move J2 to 776540 (jumper J10–J12)"],
     ["KW11 line clock", "777546", "clock register (BEVNT)",
-     "<b>Off</b>, and turn the BA11-N line clock on (below)"],
+     "<b>Off</b> if the box's own line clock works (below)"],
     ["Address width", "", "", "Leave at <b>18</b> for 11nix and V6"],
 ], [1.45 * inch, 0.7 * inch, 1.35 * inch, 3.2 * inch])]
 story += [Spacer(1, 4)]
 story += bullets([
-    "<b>Line clock:</b> the 11/23+'s clock register only passes on BEVNT "
-    "from the power supply. In the BA11-N, BEVNT comes from the H786 "
-    "supply through backplane jumper W1 (factory installed) and the front "
-    "panel <b>AUX ON/OFF</b> switch, which must be <b>ON</b>. Your 11/23 "
-    "needed the QBone's KW11, so the box's line clock was probably off. "
-    "Test in 11nix: <font face='Courier'>date; sleep 5; date</font> must "
-    "show 5 seconds passing.",
+    "<b>Line clock:</b> the 11/23+'s clock register only passes on BEVNT, "
+    "a 60 Hz signal from the H786 power supply, through backplane jumper "
+    "W1 (factory installed). DEC's 11/03L front panel has an AUX ON/OFF "
+    "switch that can gate it; <b>your front panel has no AUX switch</b>, "
+    "so measure instead: power on, meter from <b>BR1</b> (slot B, side 1, "
+    "pin R, BEVNT L) to chassis ground. <b>60 Hz</b> on the Hz range: the "
+    "clock is there. A steady 3 to 3.5 V: no clock; check W1. Keep the "
+    "probe off BS1 next to it (+12 V). In 11nix, "
+    "<font face='Courier'>date; sleep 5; date</font> must show 5 seconds "
+    "passing.",
     "<b>If there is no BEVNT:</b> keep the QBone KW11 on and add jumper "
     "J10–J15 on the 11/23+. That also turns off its boot ROMs and "
     "diagnostic registers, which you do not use.",
@@ -515,10 +598,13 @@ story += bullets([
 story += [PageBreak(), p("3. Setting up the KDF11-B board", H2)]
 story += [table([
     ["Setting", "Factory", "For your system"],
-    ["Console baud rate, S2 switches 1–4 (E114)", "9600",
-     "9600: switch 1 ON, 2–4 OFF"],
+    ["Console baud rate, S2 switches 1–4 (E114, the pack nearer the "
+     "outer edge)", "9600", "9600: switch 1 ON, 2–4 OFF"],
     ["2nd SLU baud rate, S2 switches 5–8", "9600",
      "9600: switch 5 ON, 6–8 OFF"],
+    ["Boot/diagnostic options, S1 (E102, the pack nearer the CPU chips)",
+     "1, 2, 4, 7 ON", "keep; S1 matters only with boot ROMs in "
+     "E126/E127 (table below)"],
     ["Character format (J36–J40)", "8 bits, no parity, 1 stop",
      "keep"],
     ["Power-up mode: jumpers J18–J19 and J18–J17", "mode 2: "
@@ -533,9 +619,37 @@ story += [table([
     ["Internal baud clock J43–J42, J45–J46", "internal",
      "keep"],
 ], [2.15 * inch, 1.9 * inch, 2.65 * inch])]
-story += [Spacer(1, 6), KeepTogether([fig_switches(), p(
-    "Figure 3. S2 (E114) set for 9600 baud on both ports (DEC Tables 2-10 "
-    "and 2-14).", CAP)])]
+story += [Spacer(1, 6), KeepTogether([fig_board(), p(
+    "Figure 3. The KDF11-B from the component side, handle edge up "
+    "(simplified from DEC Figure 2-1). The two unlabelled DIP switch packs "
+    "sit side by side: <b>S2, baud rates</b>, nearer the outer edge and the "
+    "ROM sockets; <b>S1, boot/diagnostic</b>, nearer the CPU chips.",
+    CAP)])]
+story += [PageBreak(), p("The two switch packs", H3),
+          KeepTogether([fig_switches(), p(
+    "Figure 4. Both packs as they sit on the board, at the factory "
+    "settings: switch 1 at the handle end, ON toward the CPU chips (DEC's "
+    "drawing; if your switches have ON printed on them, trust that). S2: "
+    "9600 baud on both ports (DEC Tables 2-10, 2-14, 2-21). S1: DEC "
+    "Table 2-20.", CAP)])]
+story += [table([
+    ["S1 switch", "Factory", "Function (read by the boot ROMs only)"],
+    ["1", "ON", "Run the CPU diagnostic at power-up"],
+    ["2", "ON", "Run the memory diagnostic (Ctrl-C at the console skips "
+     "it)"],
+    ["3", "OFF", "DECnet boot disabled"],
+    ["4", "ON", "Console test and boot dialogue"],
+    ["5, 6", "OFF", "not used"],
+    ["7", "ON", "Include the RL01/RL02 bootstrap program"],
+    ["8", "OFF", "not used"],
+], [0.9 * inch, 0.8 * inch, 5.0 * inch])]
+story += [Spacer(1, 4), p(
+    "With these settings and the ROMs fitted, the board tests the CPU and "
+    "memory at power-up, then starts the console dialogue. With S1 "
+    "switch 7 on, the ROMs can also boot an RL02 by themselves, so 11nix "
+    "might one day boot without the QBone depositing its loader. This is "
+    "untried; 11nix's boot block does work on a real RL controller.",
+    SMALL)]
 story += bullets([
     "<b>Mode 2 with DEC's BDV11 ROMs</b> in E126/E127: the board runs its "
     "CPU and memory tests and asks <font face='Courier'>START?</font>. "
@@ -548,8 +662,7 @@ story += bullets([
     "<b>Where things are:</b> J1 (console, “J1 CONSOLE SLU 1”) "
     "and J2 (“SLU 2”) are side by side on the handle edge, J2 "
     "nearer the corner. The jumper stakes J10–J19 are in a column near "
-    "the middle of the board, and S2 (E114) is next to S1 (E102). DEC's "
-    "Figure 2-1 shows the full layout.",
+    "the middle of the board (Figure 3).",
     "<b>Addresses:</b> console 777560 (vectors 60/64), 2nd SLU 776500 "
     "(300/304), clock register 777546 (vector 100), boot ROMs 173000.",
 ])
@@ -562,9 +675,9 @@ story += [PageBreak(), p("4. The console cable", H2),
             "serial port. It includes the null-modem crossing, so no "
             "adapter is needed."),
           KeepTogether([fig_header(),
-          p("Figure 4. The header pins and what each one carries.", CAP)]),
+          p("Figure 5. The header pins and what each one carries.", CAP)]),
           KeepTogether([fig_cable(),
-          p("Figure 5. Wiring. This is the “DCE DE-9S” column of "
+          p("Figure 6. Wiring. This is the “DCE DE-9S” column of "
             "the standard DEC pinout.", CAP)])]
 story += [table([
     ["Header pin", "Signal", "DE-9 female (PC)", "Note"],
