@@ -172,21 +172,21 @@ def fig_path():
     tp(d, 458, 324, 4)
     box(d, 432, 276, 74, 36, "KDF11-B", ["row 1: counts", "falling edges"],
         tsize=7.5)
-    s(d, 324, 312, "Pull-up: BR1 sat at 5 V", 7, WARN)
-    s(d, 324, 302, "with no cards in; source", 7, WARN)
-    s(d, 324, 292, "not found yet (perhaps", 7, WARN)
-    s(d, 324, 282, "the front panel board)", 7, WARN)
+    s(d, 324, 312, "No pull-up here: the", 7, WARN)
+    s(d, 324, 302, "front panel's 2 k\u03a9 holds", 7, WARN)
+    s(d, 324, 292, "the line at 5 V. BR1 sat", 7, WARN)
+    s(d, 324, 282, "at 5 V with no pulses.", 7, WARN)
 
     # cable B -> front panel
     wire(d, [244, 157, 302, 157, 302, 200, 316, 200])
     s(d, 266, 161, "pin 2", 7, SIG)
     box(d, 316, 136, 196, 112, "Front panel (bezel) board", [
         "J1: 10-pin, pin 2 = the clock line",
-        "W1, W2: jumpers. DEC: 'in' = the AUX",
-        "  ON/OFF switch controls LTC, and",
-        "  OFF disables it",
-        "S1-S3: switch contact holes. Your",
-        "  panel has no AUX switch fitted",
+        "ON/OFF switch (AUX on some models):",
+        "  OFF grounds the clock line,",
+        "  ON lifts the ground (measured)",
+        "2 k\u03a9 pull-up to +5 V on the line:",
+        "  the line's only pull-up",
         "Pass-through lines: SRUN (pin 3) for",
         "  RUN, BHALT (pin 9) from HALT"])
     tp(d, 302, 178, 5)
@@ -225,14 +225,14 @@ story += [p("The 11/23+ (KDF11-B) gets its 60 Hz clock interrupt from bus "
             "cards) BR1 sits at a steady 5 V, so the 11/23+ sees no edges "
             "and 11nix gets no ticks."),
           p("Figure 1 is drawn from DEC's H786 drawings: the master board "
-            "(54-12530) and the power monitor board (54-12528). DEC "
-            "documents the front panel board only in outline (BA11-N "
-            "guide, Figure 2-3 and Table 2-2), so its inside is not drawn."),
+            "(54-12530) and the power monitor board (54-12528). The front "
+            "panel board's part was traced on the board itself: its "
+            "ON/OFF switch and a 2 k\u03a9 pull-up."),
           Spacer(1, 4),
           KeepTogether([fig_path(), p(
               "Figure 1. The clock path. Q1 on the monitor board is the "
-              "only thing in the supply that drives the line, and it can "
-              "only pull it low.", CAP)])]
+              "only thing that pulls the line low; the front panel's "
+              "2 k\u03a9 is the only thing that pulls it high.", CAP)])]
 
 story += [PageBreak(), p("The 10-pin headers J5 / J6 and the backplane", H2),
           table([
@@ -284,17 +284,21 @@ story += [p("What each test point should show", H2),
 
 story += [p("Finding the fault, step by step", H2)]
 story += steps([
-    "<b>Front panel first.</b> Power off, unplug the front panel's 10-pin "
-    "cable (at the panel, or at whichever of J5/J6 it uses). Power on, "
-    "backplane connected, 11/23+ installed. Scope BR1. <b>60 Hz now:</b> "
-    "the front panel was holding the line. Look at its W1/W2 jumpers and "
-    "the empty AUX switch position (S1 to S3 holes). If BR1 floats with "
-    "the panel unplugged, the panel was the pull-up: clip 2.2 kΩ to "
-    "+5 V for this test.",
-    "<b>Still flat:</b> scope TP3 (Q1 collector). Switching at TP3 but "
-    "not at TP4: the path between them (cable, crimp, W1). Flat at TP3: "
-    "scope TP2. Switching at TP2 but not TP3: Q1 or the finger contact. "
-    "Flat at TP2: TP1, the comparator and its supply.",
+    "<b>Front panel switch.</b> The panel's ON/OFF switch (AUX on some "
+    "models) grounds the clock line when OFF and lifts the ground when "
+    "ON; the panel also holds the only pull-up, 2 kΩ to +5 V. With the "
+    "meter, check that pin 2 is not grounded in the position the machine "
+    "runs in.",
+    "<b>Follow the pulses, everything connected</b> (supply, backplane, "
+    "front panel, switch ON): scope TP3 (Q1 collector), pin 2 of J5 and "
+    "of J6 (from the back of the connectors), the backplane header pin 2 "
+    "and TP4 (BR1), in that order. The first flat one is past the fault: "
+    "J3-A to J5/J6 on the master board, then the cable and crimp, then "
+    "W1. Confirm the BR1 pin with the meter: it must beep to header pin "
+    "2; BV1 at the end of the row is +5 V.",
+    "<b>Flat already at TP3:</b> scope TP2. Switching at TP2 but not TP3: "
+    "Q1 or the finger contact. Flat at TP2: TP1, the comparator and its "
+    "supply.",
     "<b>When BR1 switches:</b> boot 11nix with the QBone's KW11 off and "
     "run <font face='Courier'>date; sleep 5; date</font>. It must show 5 "
     "seconds.",
